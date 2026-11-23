@@ -1,8 +1,9 @@
 
 'use strict';
 import {analyzeMechanism,solveConstraints} from './diagnostics.js';
+import {solveConstraints as solveInverseConstraints} from './solver.js';
 import {ProjectHistory} from './history.js';
-// KINÉTIKA V6 | Editor de juntas por portas mecânicas tipadas, encaixe e diagnóstico de restrições.
+// KINÉTIKA V9 | Arraste cinemático inverso com metas suaves e restrições prioritárias.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
 const TAU=Math.PI*2, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, RACK_CLEARANCE=9;
@@ -10,6 +11,7 @@ const fmt=(n,d=1)=>Number.isFinite(n)?Number(n).toLocaleString('pt-BR',{minimumF
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const dot=(a,b)=>a.x*b.x+a.y*b.y;
 const normDeg=d=>((d+180)%360+360)%360-180;
+let inverseDragInfo=null,inverseGhost=null;
 let lastSolveInfo={ok:true,maxResidual:0,iterations:0,constraints:0};
 let M,sel=null,multi=[],tool='select',pending=null,pendingPort=null,hoverPort=null,drag=null,manualDrive=null,snapCandidate=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
 let cam={x:0,y:0,scale:1.5},view={x:-300,y:-220,w:600,h:440};
@@ -308,8 +310,8 @@ function makeMotor(kind,obj,mode='motor'){
   }else return false;
   t=0;playing=false;updatePlay();solve();toast(mode==='spring'?'Abertura idealizada por mola configurada.':'Motor instalado. Ajuste a velocidade nas propriedades.');return true;
 }
-function setTool(next){pendingPort=null;hoverPort=null;if(['alignX','alignY'].includes(next)&&multi.length===2){useTwoSelection(next==='alignX'?'x':'y');next='select'}tool=next;pending=null;document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===next));$('modeBadge').innerHTML='FERRAMENTA <span>'+({select:'TESTAR',move:'MOVER CONJUNTO',rotate:'ROTACIONAR',joint:'UNIR PONTOS',node:'PIVÔ LIVRE',fixed:'APOIO FIXO',bar:'BARRA',slider:'GUIA LINEAR',gear:'ENGRENAGEM',pulley:'POLIA',rack:'CREMALHEIRA',mesh:'ENGRENAR',belt:'CORREIA',rackmesh:'PINHÃO + CREMALHEIRA',eccentric:'PINO EXCÊNTRICO',motor:'MOTOR',spring:'MOLA IDEALIZADA',alignX:'ALINHAR X',alignY:'ALINHAR Y',delete:'EXCLUIR'}[next]||next.toUpperCase())+'</span>';
-  const texts={joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>Transmissão encadeada:</strong> arraste uma cremalheira para mover as demais. Selecione uma cremalheira e gire pelo círculo ⤾ ou use R. Arrastar o fundo move a vista.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
+function setTool(next){pendingPort=null;hoverPort=null;inverseDragInfo=null;inverseGhost=null;if(['alignX','alignY'].includes(next)&&multi.length===2){useTwoSelection(next==='alignX'?'x':'y');next='select'}tool=next;pending=null;document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===next));$('modeBadge').innerHTML='FERRAMENTA <span>'+({select:'TESTAR',move:'MOVER CONJUNTO',rotate:'ROTACIONAR',joint:'UNIR PONTOS',node:'PIVÔ LIVRE',fixed:'APOIO FIXO',bar:'BARRA',slider:'GUIA LINEAR',gear:'ENGRENAGEM',pulley:'POLIA',rack:'CREMALHEIRA',mesh:'ENGRENAR',belt:'CORREIA',rackmesh:'PINHÃO + CREMALHEIRA',eccentric:'PINO EXCÊNTRICO',motor:'MOTOR',spring:'MOLA IDEALIZADA',alignX:'ALINHAR X',alignY:'ALINHAR Y',delete:'EXCLUIR'}[next]||next.toUpperCase())+'</span>';
+  const texts={joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>V9 · Arraste inverso:</strong> puxe um pivô, a extremidade de uma barra, uma cremalheira, o pinhão ou o acionamento do pantógrafo. As barras e guias permanecem rígidas e o alvo fica limitado pela geometria. Para reposicionar o conjunto use G.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
 function sizeView(){const w=Math.max(stage.clientWidth,100),h=Math.max(stage.clientHeight,100);view={w:w/cam.scale,h:h/cam.scale,x:cam.x-w/(2*cam.scale),y:cam.y-h/(2*cam.scale)};stage.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);return view}
 function ptOf(e){const r=stage.getBoundingClientRect();return {x:view.x+((e.clientX-r.left)/r.width)*view.w,y:view.y+((e.clientY-r.top)/r.height)*view.h}}
 function hitNode(p){let best=null,bestD=18/cam.scale;for(const n of M.nodes){let d=dist(p,n);if(d<bestD){best=n;bestD=d}}return best}
@@ -478,11 +480,15 @@ function sceneSVG(){
     }
   }
   if(snapCandidate){const a=snapCandidate.point;s+=`<circle cx="${a.x}" cy="${a.y}" r="${20/cam.scale}" fill="#9cf5b6" fill-opacity=".16" stroke="#b5ffde" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none"/><text x="${a.x+18/cam.scale}" y="${a.y-18/cam.scale}" fill="#ddffef" font-size="${12/cam.scale}" pointer-events="none">SOLTAR PARA CONECTAR</text>`;}
+  if(drag?.kind?.startsWith('ik')&&inverseGhost){
+    const r=inverseGhost,show=r.goal&&r.actual&&Math.hypot(r.goal.x-r.actual.x,r.goal.y-r.actual.y)>5;
+    if(show){s+=`<line x1="${r.actual.x}" y1="${r.actual.y}" x2="${r.goal.x}" y2="${r.goal.y}" stroke="#f4c57c" stroke-width="${1.5/cam.scale}" stroke-dasharray="${5/cam.scale} ${4/cam.scale}" opacity=".65" pointer-events="none"/><circle cx="${r.goal.x}" cy="${r.goal.y}" r="${10/cam.scale}" fill="none" stroke="#f5c782" stroke-width="${1.5/cam.scale}" stroke-dasharray="${3/cam.scale} ${3/cam.scale}" pointer-events="none"/>`;}
+  }
   if(multi.length){for(const item of multi){const pos=entityPosition(item);if(pos)s+=`<circle cx="${pos.x}" cy="${pos.y}" r="${20/cam.scale+4}" stroke="#f7bf76" stroke-width="2.5" fill="none" pointer-events="none"/>`}}
   if(pending){const first=pending.id,kind=pending.kind;let p0=kind==='object'?entityPosition(pending):kind==='gear'?node(gear(first)?.node):kind==='rack'?node(rack(first)?.node):node(first);if(p0){s+=`<line x1="${p0.x}" y1="${p0.y}" x2="${pointer.x}" y2="${pointer.y}" stroke="#f6c17f" stroke-width="2" stroke-dasharray="8 5" pointer-events="none"/><circle cx="${p0.x}" cy="${p0.y}" r="13" fill="none" stroke="#f6c17f" stroke-width="2" pointer-events="none"/>`}}
   return s;
 }
-function render(){stage.innerHTML=sceneSVG();const badge=$('solverBadge');if(badge){const ok=lastSolveInfo.ok&&maxResidual<.55;badge.textContent=ok?'◇ SOLUCIONADOR · OK':'◇ RESTRIÇÕES · VERIFICAR';badge.classList.toggle('solver-warning',!ok);badge.title='KINÉTIKA V8: '+(lastSolveInfo.constraints??0)+' restrições, erro '+fmt(maxResidual,2)+' mm';}if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
+function render(){stage.innerHTML=sceneSVG();const badge=$('solverBadge');if(badge){const ok=lastSolveInfo.ok&&maxResidual<.55;badge.textContent=ok?'◇ SOLUCIONADOR · OK':'◇ RESTRIÇÕES · VERIFICAR';badge.classList.toggle('solver-warning',!ok);badge.title='V9: cinemática inversa; erro estrutural '+fmt(maxResidual,2)+' mm';if(drag?.kind?.startsWith('ik')&&inverseDragInfo){badge.textContent=inverseDragInfo.blocked?'◇ MOVIMENTO BLOQUEADO':inverseDragInfo.limitReached?'◇ LIMITE CINEMÁTICO':'◇ ARRASTE INVERSO · OK';badge.classList.toggle('solver-warning',inverseDragInfo.blocked);}}if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
 function select(type,id,keepMulti=false){sel=type?{type,id}:null;if(!keepMulti)multi=[];renderProperties();render()}
 function optRow(label,id,val,step='1',kind='number',min=''){return `<label class="field"><span>${label}</span><input data-prop="${id}" type="${kind}" ${kind==='number'?`step="${step}"`:''} ${min!==''?`min="${min}"`:''} value="${str(val)}"></label>`}
 function checkRow(label,id,value){return `<label class="field"><span>${label}</span><input type="checkbox" data-prop="${id}" ${value?'checked':''}></label>`}
@@ -639,7 +645,9 @@ function onDown(e){
  const group=groupForTarget(picked),kind=dom?.dataset.kind;
  if(group){
    select('scissor',group.id);
-   if(kind==='scissor-drive'&&tool==='select')drag={kind:'scissorHeight',id:group.id,start:p,original:group.height};
+   if(kind==='scissor-drive'&&tool==='select'){
+     const n=node(group.driveId);drag={kind:'ikNode',id:group.driveId,start:p,origin:{x:n.x,y:n.y},scissorId:group.id};
+   }
    else if(kind==='scissor-rotate'||tool==='rotate'){
      const c=scissorCenter(group);drag={kind:'scissorRotate',id:group.id,startAngle:group.angle,center:c,pointerAngle:Math.atan2(p.y-c.y,p.x-c.x)};
    }else drag={kind:'scissorMove',id:group.id,start:p,previous:p,origin:{x:group.x,y:group.y}};
@@ -649,25 +657,29 @@ function onDown(e){
    if(kind==='rack-anchor'&&tool==='select'){drag={kind:'rackAnchor',id:r.id,start:p,origin:r.anchorX||0}}
    else if(tool==='rotate'||handle){drag={kind:'rackRotate',id:r.id,offset:rad(n.slider.angle)-(Math.atan2(p.y-n.y,p.x-n.x)+Math.PI/2)}}
    else if(tool==='move'){drag={kind:'assemblyMove',target:{type:'rack',id:r.id},start:p,previous:p}}
-   else drag={kind:'rack',id:r.id,start:p,origin:rackQ(r)};
+   else drag={kind:'ikNode',id:n.id,start:p,origin:{x:n.x,y:n.y},rackId:r.id};
  }else if(picked.type==='gear'){
    const g=gear(picked.id),center=node(g.node),pointerAngle=Math.atan2(p.y-center.y,p.x-center.x);
    select('gear',g.id);
    const nearCenter=dist(p,center)<Math.max(13/cam.scale,g.radius*.29);
    if(tool==='move'||tool==='select'&&nearCenter)drag={kind:'assemblyMove',target:{type:'gear',id:g.id},start:p,previous:p};
-   else drag={kind:'gear',id:g.id,lastAngle:pointerAngle,angle:g.angle};
+   else drag={kind:'ikGear',id:g.id,lastAngle:pointerAngle,angle:g.angle};
  }else if(picked.type==='bar'){
    const b=bar(picked.id),a=node(b.a),z=node(b.b);
    select('bar',b.id);
-   if(tool==='move'||tool==='select'&&!a.fixed&&!z.fixed){drag={kind:'assemblyMove',target:{type:'bar',id:b.id},start:p,previous:p}}
-   else {const anchor=a.fixed?'a':z.fixed?'b':'a',pn=anchor==='a'?a:z;
+   if(tool==='move'){drag={kind:'assemblyMove',target:{type:'bar',id:b.id},start:p,previous:p}}
+   else if(tool==='select'){
+     const end=dist(p,a)<dist(p,z)?a:z;
+     if(!end.fixed)drag={kind:'ikNode',id:end.id,start:p,origin:{x:end.x,y:end.y}};
+     else {const other=end===a?z:a;if(!other.fixed)drag={kind:'ikNode',id:other.id,start:p,origin:{x:other.x,y:other.y}}}
+   }else{const anchor=a.fixed?'a':z.fixed?'b':'a',pn=anchor==='a'?a:z;
      drag={kind:'barRotate',id:b.id,anchor,offset:Math.atan2(z.y-a.y,z.x-a.x)-Math.atan2(p.y-pn.y,p.x-pn.x)};
    }
  }else if(picked.type==='node'){
    const n=node(picked.id),join=pointLinkOfNode(n.id);select('node',n.id);
-   if(tool==='move'||n.fixed){drag={kind:'assemblyMove',target:{type:'node',id:n.id},start:p,previous:p}}
-   else if(join){const r=rack(join.rackId);drag={kind:'linkedNode',id:n.id,rackId:r.id,start:p,origin:rackQ(r)}}
-   else drag={kind:'node',id:n.id,start:p,origin:{x:n.x,y:n.y}};
+   if(tool==='move'){drag={kind:'assemblyMove',target:{type:'node',id:n.id},start:p,previous:p}}
+   else if(n.fixed){toast('Este é um apoio fixo. Use Mover (G) para reposicionar a montagem.',true);}
+   else drag={kind:'ikNode',id:n.id,start:p,origin:{x:n.x,y:n.y}};
  }
  if(drag){stage.setPointerCapture(e.pointerId);stage.classList.add('dragging')}
 }
@@ -704,11 +716,42 @@ function finishManual(){
   solve(145);
   render();
 }
+// V9: arraste inverso — o cursor é um alvo suave, nunca um apoio rígido.
+function runInverseGoal(request){
+ const goals=new Map(),fixed=new Map();
+ if(request.kind==='gear')goals.set(`${request.id}.angle`,request.angle);
+ else{goals.set(`${request.id}.x`,request.x);goals.set(`${request.id}.y`,request.y)}
+ if(request.scissorId){const g=scissor(request.scissorId);
+   if(g&&!scissorLink(g.id)){
+     fixed.set(`${g.id}.x`,g.x);fixed.set(`${g.id}.y`,g.y);fixed.set(`${g.id}.angle`,rad(g.angle));
+   }
+ }
+ const backup=JSON.stringify(M);
+ let result=solveInverseConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.25:.038,iterations:24,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-8});
+ if(!result.ok){
+   Object.assign(M,JSON.parse(backup));
+   result=solveInverseConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.07:.008,iterations:28,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-9});
+ }
+ if(!result.ok){Object.assign(M,JSON.parse(backup));inverseDragInfo={...result,blocked:true};}
+ else inverseDragInfo={...result,blocked:false};
+ if(result.ok){lastSolveInfo=result;maxResidual=result.maxResidual;}
+ if(request.kind==='node'){
+   const at=node(request.id);inverseGhost={goal:{x:request.x,y:request.y},actual:at?{x:at.x,y:at.y}:null};
+ }else inverseGhost=null;
+ render();
+}
 function onMove(e){
  const p=ptOf(e);pointer=p;
  $('coordBadge').textContent='X '+fmt(p.x,0)+' · Y '+fmt(p.y,0)+' mm';
  if(!drag){if(tool==='joint'){const next=closestPort(p,22/cam.scale,pendingPort);if((hoverPort?portId(hoverPort):null)!==(next?portId(next):null)){hoverPort=next;render()}}else if(pending)render();return}
- if(drag.kind==='assemblyMove'){
+ if(drag.kind==='ikNode'){
+   runInverseGoal({kind:'node',id:drag.id,x:drag.origin.x+p.x-drag.start.x,y:drag.origin.y+p.y-drag.start.y,scissorId:drag.scissorId});
+ }else if(drag.kind==='ikGear'){
+   const g=gear(drag.id),center=node(g.node),a=Math.atan2(p.y-center.y,p.x-center.x);
+   let delta=a-drag.lastAngle;if(delta>Math.PI)delta-=TAU;if(delta< -Math.PI)delta+=TAU;
+   drag.angle+=delta;drag.lastAngle=a;
+   runInverseGoal({kind:'gear',id:g.id,angle:drag.angle});
+ }else if(drag.kind==='assemblyMove'){
    const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;translateAssembly(drag.target,dx,dy);drag.previous=p;solve(100);render();
  }else if(drag.kind==='scissorMove'){
    const g=scissor(drag.id);if(scissorLink(g.id)){const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;translateAssembly({type:'scissor',id:g.id},dx,dy);drag.previous=p;}else{g.x=drag.origin.x+p.x-drag.start.x;g.y=drag.origin.y+p.y-drag.start.y}solve(100);render();
@@ -753,16 +796,19 @@ function onMove(e){
  }else if(drag.kind==='pan'){
    cam.x=drag.origin.x-(e.clientX-drag.start.x)/cam.scale;cam.y=drag.origin.y-(e.clientY-drag.start.y)/cam.scale;render();
  }
- if(drag.kind==='node')snapCandidate=bestPivotSnap(drag.id);else if(['rackAnchor','rack','assemblyMove','scissorMove','scissorHeight'].includes(drag.kind))snapCandidate=bestSnapCandidate();if(snapCandidate)render();
+ if(drag.kind==='ikNode')snapCandidate=bestPivotSnap(drag.id);else if(['rackAnchor','rack','assemblyMove','scissorMove','scissorHeight'].includes(drag.kind))snapCandidate=bestSnapCandidate();if(snapCandidate)render();
 }
 function onUp(e){
+  if(drag&&['ikNode','ikGear'].includes(drag.kind)){
+    for(const g of M.gears)g.baseAngle=g.angle-(g.motor?.type==='motor'?rad(g.motor.rpm*6)*t:0);
+  }
   if(drag&&manualDrive)finishManual();
-  if(drag&&snapCandidate?.kind==='port'&&drag.kind==='node'){const target=snapCandidate.target,source=snapCandidate.source;if(connectJointPorts(source,target)&&target.kind==='node')sel={type:'node',id:target.nodeId}}
+  if(drag&&snapCandidate?.kind==='port'&&drag.kind==='ikNode'){const target=snapCandidate.target,source=snapCandidate.source;if(connectJointPorts(source,target)&&target.kind==='node')sel={type:'node',id:target.nodeId}}
   if(drag&&snapCandidate?.kind==='pin'&&['rackAnchor','rack','assemblyMove','scissorMove','scissorHeight'].includes(drag.kind)){
     const candidate=snapCandidate,r=rack(candidate.rackId),g=scissor(candidate.scissorId);
     if(r&&g&&dist(rackAnchor(r),node(g.driveId))<=(23/cam.scale)&&attachRackScissor(r,g)){solve(155);toast('◉ Encaixe cinemático criado! A cremalheira agora aciona a abertura do pantógrafo.');}
   }
-  snapCandidate=null;drag=null;
+  snapCandidate=null;drag=null;inverseGhost=null;inverseDragInfo=null;
   renderProperties();render();
   stage.classList.remove('dragging');
   try{stage.releasePointerCapture(e.pointerId)}catch{}
