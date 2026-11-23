@@ -1,5 +1,7 @@
 
 'use strict';
+import {analyzeMechanism} from './diagnostics.js';
+import {ProjectHistory} from './history.js';
 // KINÉTIKA V6 | Editor de juntas por portas mecânicas tipadas, encaixe e diagnóstico de restrições.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
@@ -813,7 +815,7 @@ function goPreset(name){pendingPort=null;hoverPort=null;if(name==='scissor'){cre
   }else M.name='Projeto sem título';
   $('projectTitle').textContent=M.name;solve(200);renderProperties();requestAnimationFrame(fit);updateTime();$('examplesModal').classList.remove('show');setTool('select');
 }
-function serialize(){return {version:6,app:'Kinetika',project:M}}
+function serialize(){return {version:7,app:'Kinetika',project:M}}
 function download(name,contents,mime){let blob=new Blob([contents],{type:mime}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),400)}
 function exportJSON(){download((M.name||'mecanismo').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-')+'.json',JSON.stringify(serialize(),null,2),'application/json');toast('Projeto exportado em JSON.')}
 function exportSVG(){const old=stage.getAttribute('viewBox'),content=`<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="${old}" width="1400" height="900">${sceneSVG()}</svg>`;download('kinetika-mecanismo.svg',content,'image/svg+xml');toast('Desenho SVG exportado.')}
@@ -842,12 +844,29 @@ function loadJSON(input){let a=input?.project||input;if(!a||!Array.isArray(a.nod
   pendingPort=null;hoverPort=null;
   t=0;playing=false;sel=null;multi=[];pending=null;manualDrive=null;updatePlay();$('projectTitle').textContent=M.name;solve();renderProperties();fit();setTool('select');toast('Projeto importado com sucesso.');
 }
+
+const history=new ProjectHistory(80), AUTOSAVE_KEY='kinetika.mechanical-atelier.v7';
+let saveTimer=null;
+function historyUI(){$('undoBtn').disabled=!history.canUndo;$('redoBtn').disabled=!history.canRedo}
+function checkpoint(){if(history.capture(M)){historyUI();clearTimeout(saveTimer);const b=$('saveBadge');if(b)b.textContent='○ ALTERAÇÕES LOCAIS';saveTimer=setTimeout(()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()));if(b)b.textContent='● SALVO LOCALMENTE'}catch{}},550)}}
+function restoreHistory(m){if(!m)return;playing=false;manualDrive=null;loadJSON({version:7,project:m});historyUI();clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()))}catch{}},550)}
+function undoProject(){restoreHistory(history.undo());toast('Ação desfeita.')}
+function redoProject(){restoreHistory(history.redo());toast('Ação refeita.')}
+function showDiagnostics(){solve(180);const a=analyzeMechanism(M),status={móvel:'Montagem móvel',travado:'Montagem travada',incompatível:'Montagem incompatível',parcial:'Análise parcial'}[a.status]||'Montagem vazia';const info=(label,value,sub)=>'<div class="diag-metric"><span>'+label+'</span><strong>'+str(value??'—')+'</strong><span>'+sub+'</span></div>';const items=a.issues.map(v=>'<div class="diag-issue '+str(v.severity)+'"><strong>'+str(v.label)+'</strong><p>'+str(v.explanation)+'</p></div>').join('')||'<div class="diag-issue"><strong>Nenhuma inconsistência detectada.</strong><p>A ausência de resíduos não prova resistência ou ausência de colisões.</p></div>';$('diagnoseResults').innerHTML='<div class="diag-status '+(a.status==='incompatível'?'error':'')+'">◉ '+status+'</div><div class="diag-metrics">'+info('Mobilidade estimada',a.mobility,'graus de liberdade no plano')+info('Equações',a.constraints,'restrições consideradas')+info('Posto',a.rank,'posto numérico')+info('Dependentes',a.redundant,'possíveis redundâncias')+'</div><div class="diag-issues">'+items+'</div><div class="diag-caveat">Estimativa local na geometria atual. Movimentos globais de montagens sem apoios contam como liberdade. Não calcula forças, torque, atrito, colisões, flexão nem resistência estrutural.</div>';$('diagnoseModal').classList.add('show')}
+$('undoBtn').onclick=undoProject;$('redoBtn').onclick=redoProject;$('diagnoseBtn').onclick=showDiagnostics;$('diagnoseRefresh').onclick=showDiagnostics;
+stage.addEventListener('pointerup',()=>queueMicrotask(checkpoint));
+stage.addEventListener('pointercancel',()=>queueMicrotask(checkpoint));
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(b&&!['undoBtn','redoBtn','diagnoseBtn','diagnoseRefresh'].includes(b.id))queueMicrotask(checkpoint)});
+document.addEventListener('change',e=>{if(e.target.matches('input,select'))queueMicrotask(checkpoint)});
+document.addEventListener('pointerup',e=>{if(e.target.closest('input[type=range]'))queueMicrotask(checkpoint)});
+window.addEventListener('beforeunload',()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()))}catch{}});
+
 $('palette').addEventListener('click',e=>{const b=e.target.closest('[data-tool]');if(b)setTool(b.dataset.tool)});
 $('newPreset').onclick=()=>$('examplesModal').classList.add('show');
 $('newBlank').onclick=()=>{goPreset('blank');toast('Área de trabalho limpa. Comece pelos apoios.')};
 $('exportBtn').onclick=exportJSON;$('svgBtn').onclick=exportSVG;
 $('importBtn').onclick=()=>$('fileInput').click();
-$('fileInput').addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{loadJSON(JSON.parse(await f.text()))}catch(err){toast('Falha ao importar: '+err.message,true)}e.target.value=''});
+$('fileInput').addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{loadJSON(JSON.parse(await f.text()));checkpoint()}catch(err){toast('Falha ao importar: '+err.message,true)}e.target.value=''});
 $('helpBtn').onclick=()=>$('helpModal').classList.add('show');
 $('scissorBuilderBtn').onclick=()=>$('scissorModal').classList.add('show');
 $('buildScissor').onclick=()=>createScissor($('scissorStages').value,$('scissorWidth').value,$('scissorHeight').value,false);
@@ -864,6 +883,6 @@ $('properties').addEventListener('input',e=>{const anchor=e.target.closest('[dat
   const slider=e.target.closest('[data-rack-slider]');if(!slider)return;playing=false;updatePlay();manualRackPosition(rack(slider.dataset.rackSlider),Number(slider.value),true)});
 $('properties').addEventListener('change',e=>{let p=e.target.closest('[data-prop]');if(p)applyProperty(p.dataset.prop,p.value,p.checked)});
 $('properties').addEventListener('click',e=>{let act=e.target.closest('[data-act]');if(!act)return;if(act.dataset.act==='fit')fit();if(act.dataset.act==='detachPoint'){removePointLink(act.dataset.linkId)}if(['anchorStart','anchorCenter','anchorEnd'].includes(act.dataset.act)&&sel?.type==='rack'){const r=rack(sel.id);const pos=act.dataset.act==='anchorStart'?-r.length/2+6:act.dataset.act==='anchorEnd'?r.length/2-6:0;setRackAnchor(r,pos);solve(120);renderProperties();render();}if(act.dataset.act==='unlinkPin'){const l=sel?.type==='rack'?rackLink(sel.id):sel?.type==='scissor'?scissorLink(sel.id):null;if(l){detachPinLink(l.id);solve(100);renderProperties();render();}}if(act.dataset.act==='alignSelectionX')useTwoSelection('x');if(act.dataset.act==='alignSelectionY')useTwoSelection('y');if(act.dataset.act==='delete'&&sel)deleteItem(sel.type,sel.id);if(act.dataset.act==='disconnectRack'&&sel?.type==='rack'){disconnectRack(rack(sel.id));solve();renderProperties();render();toast('Cremalheira desconectada; permanece orientável.')}if(act.dataset.act==='stopMotor'){M.gears.forEach(g=>g.baseAngle=g.angle);removeMotors();playing=false;t=0;updatePlay();solve();render();renderProperties();toast('Acionamento removido.')}if(['motor','spring'].includes(act.dataset.act)&&sel){let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):gear(sel.id);if(obj&&makeMotor(sel.type,obj,act.dataset.act))renderProperties()}if(act.dataset.act==='eccentric'&&sel?.type==='gear'){let nn=addFollower(gear(sel.id));select('node',nn.id);solve()}});
-window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel)deleteItem(sel.type,sel.id)}const keys={j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
+window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoProject();else undoProject();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoProject();return}if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel){deleteItem(sel.type,sel.id);checkpoint()}}const keys={j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
 let previous=0;function tick(ms){if(!previous)previous=ms;const dt=clamp((ms-previous)/1000,0,.05);previous=ms;if(playing){t+=dt*speed;solve();render();updateTime()}requestAnimationFrame(tick)}
-new ResizeObserver(()=>render()).observe(stage);goPreset('rackdual');select('rack',M.racks[1].id);requestAnimationFrame(tick);
+new ResizeObserver(()=>render()).observe(stage);goPreset('rackdual');select('rack',M.racks[1].id);try{const raw=localStorage.getItem(AUTOSAVE_KEY);if(raw){loadJSON(JSON.parse(raw));toast('Projeto recuperado do navegador.')}}catch(e){console.warn('Autosave não pôde ser recuperado',e)}history.seed(M);historyUI();requestAnimationFrame(tick);

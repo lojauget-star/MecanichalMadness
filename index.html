@@ -18,6 +18,7 @@
   <div class="head-actions">
     <button class="btn" id="newPreset" title="Abrir mecanismos de exemplo">▦ <span class="hide-small">Exemplos</span></button>
     <button class="btn" id="newBlank" title="Novo mecanismo vazio">＋ <span class="hide-small">Novo</span></button>
+    <button class="btn mini" id="undoBtn" title="Desfazer (Ctrl+Z)" disabled>↶</button><button class="btn mini" id="redoBtn" title="Refazer (Ctrl+Shift+Z)" disabled>↷</button><button class="btn" id="diagnoseBtn" title="Diagnóstico geométrico">◇ <span class="hide-small">Analisar</span></button>
     <button class="btn" id="exportBtn" title="Exportar projeto JSON">↓ <span class="hide-small">Salvar</span></button>
     <button class="btn" id="importBtn" title="Importar projeto JSON">↑ <span class="hide-small">Abrir</span></button>
     <button class="btn mini" id="helpBtn" title="Como usar">?</button>
@@ -55,7 +56,7 @@
 <main class="main">
   <div class="stage-wrap" id="stageWrap">
     <svg class="stage mode-select" id="stage" role="img" aria-label="Editor mecânico interativo em duas dimensões. Arraste para manipular as peças." xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="stage-top"><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div><div class="floating" id="jointBadge" aria-live="polite">◉ 0 JUNTA(S)</div></div>
+    <div class="stage-top"><div class="floating" id="saveBadge">● SALVO LOCALMENTE</div><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div><div class="floating" id="jointBadge" aria-live="polite">◉ 0 JUNTA(S)</div></div>
     <div class="stage-bottom"><button class="btn mini" id="zoomIn" title="Aproximar">＋</button><button class="btn mini" id="zoomOut" title="Afastar">−</button><button class="btn mini" id="fitBtn" title="Enquadrar mecanismo">⊡ Enquadrar</button><button class="btn mini" id="svgBtn" title="Salvar desenho vetorial SVG">⤓ SVG</button></div>
     <div class="orientation">PLANO XY · mm<br>Simulação cinemática, não estrutural</div>
     <div class="toast" id="toast"></div>
@@ -87,6 +88,7 @@
 <button class="template" data-example="spring"><i>⌁◇</i><strong>Abertura por mola</strong><span>Um mecanismo de quatro-barras sai da posição recolhida e tende a um ângulo final.</span></button>
 </div></div></div>
 <div class="modal-back" id="helpModal"><div class="modal"><div class="modal-top"><div><div class="overline">Guia rápido</div><h2>Como construir um mecanismo</h2></div><button class="btn mini" data-close="helpModal">✕ Fechar</button></div>
+<p><b>V7:</b> o comando ◇ Analisar estima graus de liberdade e redundâncias. ↶ e ↷ desfazem/refazem ações; alterações são salvas somente neste navegador. Exporte JSON para preservar uma cópia.</p>
 <p><b>1. Posicione os apoios.</b> Selecione «Apoio fixo» e clique na área. Use «Pivô livre» para articulações móveis. Com «Barra rígida», clique em dois pivôs; também é possível clicar em um espaço vazio para criar o pivô automaticamente.</p>
 <p><b>Juntas por pontos (J):</b> selecione a ferramenta <b>Unir pontos</b>, toque em uma das portas destacadas e depois na outra. As cremalheiras têm portas no início, centro, fim e no ponto dourado ajustável. É possível conectar a extremidade de uma barra a uma cremalheira, ao pivô de um pantógrafo ou ao eixo de uma engrenagem; pontos móveis conectados ao trilho podem também deslocá-lo ao serem arrastados. As ligações são guardadas no JSON V6. Portas incompatíveis ou que deformem barras são recusadas, com diagnóstico. Use J como atalho. <b>Importante:</b> conectar um pivô a um eixo fixo não aciona a rotação da engrenagem; para isso use a ferramenta de pino excêntrico.</p>
 <p><b>2. Restrinja movimentos.</b> Com «Guia linear», clique em um pivô e altere o ângulo da guia no painel de propriedades. Com «Engrenagem» ou «Polia», clique para criar uma roda. «Engrenar» e «Correia» conectam pares de rodas; o editor ajusta a distância entre centros para engrenagens isoladas.</p>
@@ -105,6 +107,7 @@
 <div class="scissor-fields"><label>Estágios (X)<input id="scissorStages" type="number" value="3" min="1" max="6" step="1"></label><label>Largura inicial de cada X (mm)<input id="scissorWidth" type="number" value="110" min="55" max="210" step="5"></label><label>Altura inicial do X (mm)<input id="scissorHeight" type="number" value="140" min="65" max="240" step="5"></label></div>
 <div class="scissor-guide"><b>Como funciona:</b> clique em Adicionar para inserir um novo pantógrafo no projeto atual. No modo Testar, arraste o controle amarelo para abrir/fechar, o centro ✥ para mover, e a alça ⤾ para girar no plano. Também funciona com G (mover) ou R (rotacionar).</div>
 <div class="menu-line" style="margin-top:16px"><button class="btn primary" id="buildScissor">＋ Adicionar ao desenho</button><button class="btn" data-close="scissorModal">Cancelar</button></div></div></div>
+<div class="modal-back" id="diagnoseModal"><div class="modal diagnostic-modal"><div class="modal-top"><div><div class="overline">ANÁLISE CINEMÁTICA 2D</div><h2>Diagnóstico de restrições</h2><p>Estimativa numérica da mobilidade da montagem e identificação de vínculos inconsistentes.</p></div><button class="btn mini" data-close="diagnoseModal">✕ Fechar</button></div><div id="diagnoseResults"></div><button class="btn primary" id="diagnoseRefresh">↻ Recalcular</button></div></div>
 <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
 <script type="module" src="/src/main.js"></script>
 </body>

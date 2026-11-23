@@ -167,3 +167,18 @@ html,body { background:var(--bg); color:var(--ink); font-family:Inter,'Pretendar
   .app{min-height:0}.playbar{min-height:62px;padding:7px}.left,.right{padding-top:10px}.section-title{margin:14px 8px 7px}
 }
 @media (prefers-reduced-motion:reduce){.btn,.tool{transition:none!important}}
+button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
+#saveBadge{background:#213833b9;color:#b4d3c4;font-size:9px;letter-spacing:.1em}
+.diagnostic-modal{width:min(750px,95vw);max-height:min(85dvh,850px);overflow-y:auto}
+.diag-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.diag-metric{border:1px solid #dfe6de;border-radius:13px;background:#f4f7f2;padding:14px 12px}
+.diag-metric strong{display:block;font-size:26px;color:#273f3c;margin:6px 0;font-variant-numeric:tabular-nums}
+.diag-metric span{font-size:10px;color:#768981}
+.diag-status{display:inline-flex;border:1px solid #cadece;background:#edf7ed;color:#2b6751;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:750}
+.diag-status.error{border-color:#efd5cf;background:#fbebe8;color:#a0473f}
+.diag-issues{display:grid;gap:8px;margin:16px 0}
+.diag-issue{border:1px solid #e0e4dd;border-radius:12px;padding:11px 14px;background:#fff}
+.diag-issue strong{font-size:12px;color:#2e4b45}.diag-issue p{font-size:11px!important;margin:3px 0 0!important}
+.diag-issue.error{border-left:3px solid #bb665b}.diag-issue.warning{border-left:3px solid #bd985c}.diag-issue.info{border-left:3px solid #5c9587}
+.diag-caveat{font-size:11px;color:#82908b;border-top:1px solid #e0e5dd;padding-top:12px;margin:15px 0;line-height:1.6}
+@media(max-width:780px){.diag-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#saveBadge{display:none}#undoBtn,#redoBtn{min-width:28px;padding:6px!important}}
