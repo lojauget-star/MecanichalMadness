@@ -182,3 +182,8 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
 .diag-issue.error{border-left:3px solid #bb665b}.diag-issue.warning{border-left:3px solid #bd985c}.diag-issue.info{border-left:3px solid #5c9587}
 .diag-caveat{font-size:11px;color:#82908b;border-top:1px solid #e0e5dd;padding-top:12px;margin:15px 0;line-height:1.6}
 @media(max-width:780px){.diag-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#saveBadge{display:none}#undoBtn,#redoBtn{min-width:28px;padding:6px!important}}
+
+/* V8 — estado do solucionador */
+#solverBadge{background:rgba(199,235,220,.92);border-color:#80bda7;color:#215b4b;font-weight:750}
+#solverBadge.solver-warning{background:rgba(252,230,206,.95);border-color:#c9a77a;color:#80551e}
+@media(max-width:780px){#solverBadge{font-size:9px;padding:5px 7px}}

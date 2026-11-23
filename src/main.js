@@ -1,6 +1,6 @@
 
 'use strict';
-import {analyzeMechanism} from './diagnostics.js';
+import {analyzeMechanism,solveConstraints} from './diagnostics.js';
 import {ProjectHistory} from './history.js';
 // KINÉTIKA V6 | Editor de juntas por portas mecânicas tipadas, encaixe e diagnóstico de restrições.
 const $=id=>document.getElementById(id);
@@ -10,6 +10,7 @@ const fmt=(n,d=1)=>Number.isFinite(n)?Number(n).toLocaleString('pt-BR',{minimumF
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const dot=(a,b)=>a.x*b.x+a.y*b.y;
 const normDeg=d=>((d+180)%360+360)%360-180;
+let lastSolveInfo={ok:true,maxResidual:0,iterations:0,constraints:0};
 let M,sel=null,multi=[],tool='select',pending=null,pendingPort=null,hoverPort=null,drag=null,manualDrive=null,snapCandidate=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
 let cam={x:0,y:0,scale:1.5},view={x:-300,y:-220,w:600,h:440};
 const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],pinLinks:[],pointLinks:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
@@ -370,13 +371,22 @@ function solve(iter=200){
     const p=rackAnchorAt(r,offsetForRackPort(r,l.slot||'custom',l.offset||0));
     n.x=p.x;n.y=p.y;locks.set(n.id,{x:p.x,y:p.y});
   }
+  // Solução global V8: juntas, transmissões, guias, barras e pantógrafos
+  // são resolvidos por um único conjunto de equações com condições de contorno.
+  const pins=new Map();
+  for(const [id,p] of locks){pins.set(id+'.x',p.x);pins.set(id+'.y',p.y)}
+  for(const g of M.gears)pins.set(g.id+'.a',g.angle);
+  for(const g of M.scissors||[])for(const key of ['x','y','angle','height'])pins.set(g.id+'.'+key,g[key]);
+  lastSolveInfo=solveConstraints(M,{pins,iterations:Math.max(3,Math.min(12,Math.ceil(iter/24)+2)),strict:true,maxVariables:150});
   const lenErr=b=>{const a=node(b.a),c=node(b.b);return Math.abs(dist(a,c)-b.length)};
+  if(!lastSolveInfo.ok){
   for(let k=0;k<iter;k++){
     // Links as rods with nonzero fixed lengths
     for(const b of M.bars){let a=node(b.a),c=node(b.b),dx=c.x-a.x,dy=c.y-a.y,d=Math.hypot(dx,dy);if(d<1e-9){dx=1;dy=0;d=1}const er=(d-b.length)/d,wa=locks.has(a.id)?0:1,wc=locks.has(c.id)?0:1,sum=wa+wc;if(sum>0){a.x+=dx*er*wa/sum;a.y+=dy*er*wa/sum;c.x-=dx*er*wc/sum;c.y-=dy*er*wc/sum}}
     for(const c of M.aligns){const a=node(c.a),b=node(c.b);if(!a||!b)continue;const ax=c.axis==='x'?'x':'y',v=(a[ax]-b[ax]),wa=locks.has(a.id)?0:1,wb=locks.has(b.id)?0:1,sum=wa+wb;if(sum>0){a[ax]-=v*wa/sum;b[ax]+=v*wb/sum}}
     for(const n of M.nodes)if(n.slider&&!locks.has(n.id)){const s=n.slider,angle=rad(s.angle),u=Math.cos(angle),v=Math.sin(angle),d=(n.x-s.ox)*u+(n.y-s.oy)*v,q=clamp(d,-s.range/2,s.range/2);n.x=s.ox+q*u;n.y=s.oy+q*v}
     for(const [id,p] of locks){const n=node(id);if(n){n.x=p.x;n.y=p.y}}
+  }
   }
   maxResidual=0;for(const b of M.bars)maxResidual=Math.max(maxResidual,lenErr(b));for(const a of M.aligns){let na=node(a.a),nb=node(a.b);if(na&&nb)maxResidual=Math.max(maxResidual,Math.abs(na[a.axis]-nb[a.axis]))}
   for(const r of M.racks)if(r.gearId){const g=gear(r.gearId),rn=node(r.node);if(g&&rn){const {u,v}=rackAxes(r),c=node(g.node),d={x:rn.x-c.x,y:rn.y-c.y};maxResidual=Math.max(maxResidual,Math.abs(r.offset-(r.side||1)*g.radius*g.angle-dot({x:rn.x-rn.slider.ox,y:rn.y-rn.slider.oy},u)));maxResidual=Math.max(maxResidual,Math.abs(dot(d,v)-(r.side||1)*(g.radius+RACK_CLEARANCE)))}}
@@ -472,7 +482,7 @@ function sceneSVG(){
   if(pending){const first=pending.id,kind=pending.kind;let p0=kind==='object'?entityPosition(pending):kind==='gear'?node(gear(first)?.node):kind==='rack'?node(rack(first)?.node):node(first);if(p0){s+=`<line x1="${p0.x}" y1="${p0.y}" x2="${pointer.x}" y2="${pointer.y}" stroke="#f6c17f" stroke-width="2" stroke-dasharray="8 5" pointer-events="none"/><circle cx="${p0.x}" cy="${p0.y}" r="13" fill="none" stroke="#f6c17f" stroke-width="2" pointer-events="none"/>`}}
   return s;
 }
-function render(){stage.innerHTML=sceneSVG();if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
+function render(){stage.innerHTML=sceneSVG();const badge=$('solverBadge');if(badge){const ok=lastSolveInfo.ok&&maxResidual<.55;badge.textContent=ok?'◇ SOLUCIONADOR · OK':'◇ RESTRIÇÕES · VERIFICAR';badge.classList.toggle('solver-warning',!ok);badge.title='KINÉTIKA V8: '+(lastSolveInfo.constraints??0)+' restrições, erro '+fmt(maxResidual,2)+' mm';}if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
 function select(type,id,keepMulti=false){sel=type?{type,id}:null;if(!keepMulti)multi=[];renderProperties();render()}
 function optRow(label,id,val,step='1',kind='number',min=''){return `<label class="field"><span>${label}</span><input data-prop="${id}" type="${kind}" ${kind==='number'?`step="${step}"`:''} ${min!==''?`min="${min}"`:''} value="${str(val)}"></label>`}
 function checkRow(label,id,value){return `<label class="field"><span>${label}</span><input type="checkbox" data-prop="${id}" ${value?'checked':''}></label>`}

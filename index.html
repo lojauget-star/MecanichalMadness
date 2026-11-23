@@ -56,7 +56,7 @@
 <main class="main">
   <div class="stage-wrap" id="stageWrap">
     <svg class="stage mode-select" id="stage" role="img" aria-label="Editor mecânico interativo em duas dimensões. Arraste para manipular as peças." xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="stage-top"><div class="floating" id="saveBadge">● SALVO LOCALMENTE</div><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div><div class="floating" id="jointBadge" aria-live="polite">◉ 0 JUNTA(S)</div></div>
+    <div class="stage-top"><div class="floating" id="saveBadge">● SALVO LOCALMENTE</div><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div><div class="floating" id="solverBadge" title="Resolução global de restrições">◇ SOLUCIONADOR 2D</div><div class="floating" id="jointBadge" aria-live="polite">◉ 0 JUNTA(S)</div></div>
     <div class="stage-bottom"><button class="btn mini" id="zoomIn" title="Aproximar">＋</button><button class="btn mini" id="zoomOut" title="Afastar">−</button><button class="btn mini" id="fitBtn" title="Enquadrar mecanismo">⊡ Enquadrar</button><button class="btn mini" id="svgBtn" title="Salvar desenho vetorial SVG">⤓ SVG</button></div>
     <div class="orientation">PLANO XY · mm<br>Simulação cinemática, não estrutural</div>
     <div class="toast" id="toast"></div>
@@ -71,7 +71,7 @@
 <aside class="right" id="inspector">
   <div class="inspector-head"><div class="overline">Editor paramétrico</div><h2 id="inspectorTitle">Propriedades</h2><p id="inspectorSubtitle">Selecione um componente para modificar seus parâmetros.</p></div>
   <div id="properties"><div class="placeholder">Clique em um pivô, barra, roda ou cremalheira para editar suas propriedades.</div></div>
-  <div class="status-box"><strong>Cinemática · montagem e transmissão no plano</strong><br>Juntas por portas compatíveis, pivô-pivô, pivô-cremalheira, pinhão e pantógrafo; verificação de curso e resíduos. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
+  <div class="status-box"><strong>KINÉTIKA V8 · resolução global de restrições 2D</strong><br>Juntas por portas compatíveis, pivô-pivô, pivô-cremalheira, pinhão e pantógrafo; verificação de curso e resíduos. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
   <div class="footer-note">Dica: <span class="kbd">Esc</span> cancela a operação · <span class="kbd">Espaço</span> inicia/pausa · <span class="kbd">Del</span> exclui seleção.</div>
 </aside>
 </div>
