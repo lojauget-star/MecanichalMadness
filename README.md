@@ -53,22 +53,22 @@ No celular, a biblioteca de ferramentas fica na faixa horizontal inferior; o ins
 - `src/main.js`: solucionador 2D da V4 estendido com juntas V5 (`pinLinks`), limites cinemáticos de acionamento e âncoras locais nas cremalheiras.
 - `src/legacy.css`: estilos funcionais do editor.
 - `src/atelier.css`: camada de design responsiva premium, sem alterar o solucionador.
-- `vite.config.js`: base `/` no ambiente local e `/MecanichalMadness/` no GitHub Pages.
-- `.github/workflows/deploy.yml`: build Vite e deploy automático no Pages ao publicar `main`.
+- `vite.config.js`: base `/` no Netlify e localhost; opção de base GitHub Pages mantida, mas não utilizada no deploy atual.
+- `.github/workflows/deploy.yml`: CI com verificação sintática e build Vite em todo push para `main`.\n- `netlify.toml`: implantação automática no Netlify via conexão do repositório GitHub.
 
-### Publicar GitHub Pages
+### Publicação no Netlify
 
-Em **Settings → Pages → Build and deployment → Source**, selecione **GitHub Actions**. O fluxo de deploy será executado em push para `main`, e o endereço esperado será `https://lojauget-star.github.io/MecanichalMadness/` quando a publicação estiver habilitada e concluída. Não confunda código enviado ao repositório com site já publicado.
+Conecte o repositório `lojauget-star/MecanichalMadness` ao Netlify, apontando para a branch `main`. O arquivo `netlify.toml` define o comando `npm run build`, a pasta `dist` e Node.js 22. Um push para `main` inicia o deploy automaticamente na integração ativa. O GitHub Actions realiza somente CI, sem tentar configurar GitHub Pages.
 
 ## Futuro
 
 A estrutura preserva o motor monolítico por compatibilidade com os projetos anteriores. A próxima migração pode isolar modelo de dados, solucionador de restrições e renderizador em módulos e adicionar testes automatizados de regressão cinemática.
 
-## Limites técnicos do encaixe V5
+## Notas sobre o acoplamento herdado da V5
 
 - A união cremalheira–pantógrafo implementa **um par cinemático deslizante acionando um pantógrafo guiado**: o eixo transversal do X se alinha automaticamente à guia da cremalheira, e a primeira articulação superior serve de referência fixa. Não são geradas automaticamente juntas arbitrárias com mobilidades inconsistentes.
 - A peça pode ser deslocada e sua âncora pode mudar de posição; a posição do suporte do pantógrafo é reconfigurada na edição. Não simula força, deformação nem colisão.
-- As âncoras da cremalheira são locais ao corpo dentado, não ao solo. Os dados ficam salvos em `racks[].anchorX` e `pinLinks[]` no projeto JSON v5.
+- As âncoras da cremalheira são locais ao corpo dentado, não ao solo. Os dados ficam salvos em `racks[].anchorX` e `pinLinks[]` no projeto JSON V6 (e são migrados de V5).
 - Se uma união faria um conjunto livre ultrapassar a faixa admitida, o solucionador limita o curso em vez de alongar artificialmente as barras.
 
 ## Limitações da V6
