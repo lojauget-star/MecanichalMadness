@@ -1,6 +1,6 @@
 # KINÉTIKA — Mechanical Atelier
 
-Laboratório de cinemática 2D em Vite, com interface responsiva de inspiração editorial japonesa/coreana. Evolução do KINÉTIKA V4, preservando o motor cinemático existente e acrescentando **pontos magnéticos e juntas de coincidência** (V5).
+Laboratório de cinemática 2D em Vite, com interface responsiva de inspiração editorial japonesa/coreana. Evolução do KINÉTIKA V5, acrescentando **juntas por portas mecânicas tipadas, ancoragens múltiplas de cremalheira e ligações de pivôs com eixos** (V6).
 
 ## Executar localmente
 
@@ -18,6 +18,16 @@ npm run check
 npm run build
 npm run preview
 ```
+
+## Novidades da V6
+
+- **J — Unir pontos:** selecione duas portas (pivôs, eixo de engrenagem, ponta/centro/âncora da cremalheira, pivô do pantógrafo). O editor identifica compatibilidade e recusa uniões geométricas inválidas.
+- **Pivô ↔ cremalheira:** uma extremidade livre de barra pode ficar vinculada à cremalheira. Sua posição acompanha o trilho; o pivô conectado pode acionar o deslocamento da cremalheira com arraste.
+- **Pivô ↔ eixo ou pivô:** os nós são fundidos em uma junta revoluta, respeitando os apoios existentes.
+- **Cremalheira ↔ pantógrafo:** transmite abertura pela guia, com limite de curso; vínculo já existente preservado.
+- **Desfazer:** links pivô–cremalheira podem ser desconectados no inspetor. Uniões nó–nó, por serem fusões de topologia, requerem desfazer via edição do projeto; o histórico universal de undo/redo é uma evolução planejada.
+- **JSON versão 6:** importa projetos antigos V1–V5 e mantém `pointLinks[]` e `pinLinks[]`.
+- **Netlify:** configuração em `netlify.toml` para publicar `dist` ao receber push do GitHub.
 
 ## Controles principais
 
@@ -60,3 +70,7 @@ A estrutura preserva o motor monolítico por compatibilidade com os projetos ant
 - A peça pode ser deslocada e sua âncora pode mudar de posição; a posição do suporte do pantógrafo é reconfigurada na edição. Não simula força, deformação nem colisão.
 - As âncoras da cremalheira são locais ao corpo dentado, não ao solo. Os dados ficam salvos em `racks[].anchorX` e `pinLinks[]` no projeto JSON v5.
 - Se uma união faria um conjunto livre ultrapassar a faixa admitida, o solucionador limita o curso em vez de alongar artificialmente as barras.
+
+## Limitações da V6
+
+O motor 2D ainda não implementa todas as famílias de juntas (junta prismática entre dois corpos rígidos, contatos 3D, engrenamentos físicos e solver dinâmico). Os acoplamentos implementados são vinculados à geometria; não declare continuidade física para tipos rejeitados. O indicador de erro informa resíduo geométrico, mas não certifica resistência nem ausência de singularidade.

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f6f5f1">
-<title>KINÉTIKA — Mechanical Atelier</title>
+<title>KINÉTIKA — Mechanical Atelier · Juntas Inteligentes</title>
 <meta name="description" content="Ateliê de engenharia cinemática. Crie, conecte e simule barras, engrenagens, cremalheiras, polias e pantógrafos diretamente no navegador.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -29,6 +29,7 @@
   <button class="tool active" data-tool="select"><span class="tool-symbol">↖</span><span><span class="tool-name">Testar / selecionar</span><div class="tool-sub">Arrastar aciona o mecanismo</div></span><span class="tool-short">V</span></button>
   <button class="tool" data-tool="move"><span class="tool-symbol">✥</span><span><span class="tool-name">Mover conjunto</span><div class="tool-sub">Reposicionar peças conectadas</div></span><span class="tool-short">G</span></button>
   <button class="tool" data-tool="rotate"><span class="tool-symbol">⤾</span><span><span class="tool-name">Rotacionar elemento</span><div class="tool-sub">Gire barras, cremalheiras e rodas</div></span><span class="tool-short">R</span></button>
+  <button class="tool" data-tool="joint"><span class="tool-symbol">◉</span><span><span class="tool-name">Unir pontos</span><div class="tool-sub">Encaixar portas mecânicas com 2 toques</div></span><span class="tool-short">J</span></button>
   <button class="tool" data-tool="node"><span class="tool-symbol">○</span><span><span class="tool-name">Pivô livre</span><div class="tool-sub">Ponto com 2 graus de liberdade</div></span><span class="tool-short">P</span></button>
   <button class="tool" data-tool="fixed"><span class="tool-symbol">⌂</span><span><span class="tool-name">Apoio fixo</span><div class="tool-sub">Articulação presa ao solo</div></span><span class="tool-short">F</span></button>
   <button class="tool" data-tool="bar"><span class="tool-symbol">━</span><span><span class="tool-name">Barra rígida</span><div class="tool-sub">Clique em dois pivôs</div></span><span class="tool-short">B</span></button>
@@ -54,7 +55,7 @@
 <main class="main">
   <div class="stage-wrap" id="stageWrap">
     <svg class="stage mode-select" id="stage" role="img" aria-label="Editor mecânico interativo em duas dimensões. Arraste para manipular as peças." xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="stage-top"><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div></div>
+    <div class="stage-top"><div class="floating" id="modeBadge">FERRAMENTA <span>SELECIONAR</span></div><div class="floating" id="coordBadge">X 0 · Y 0 mm</div><div class="floating" id="jointBadge" aria-live="polite">◉ 0 JUNTA(S)</div></div>
     <div class="stage-bottom"><button class="btn mini" id="zoomIn" title="Aproximar">＋</button><button class="btn mini" id="zoomOut" title="Afastar">−</button><button class="btn mini" id="fitBtn" title="Enquadrar mecanismo">⊡ Enquadrar</button><button class="btn mini" id="svgBtn" title="Salvar desenho vetorial SVG">⤓ SVG</button></div>
     <div class="orientation">PLANO XY · mm<br>Simulação cinemática, não estrutural</div>
     <div class="toast" id="toast"></div>
@@ -63,13 +64,13 @@
     <div class="run-group"><button class="btn primary run" id="playBtn">▶ Iniciar</button><button class="btn mini" id="resetBtn" title="Reiniciar tempo">↺ Reiniciar</button><button class="btn mini" id="stepBtn" title="Avançar 1/20 s">⏭</button></div>
     <div><div class="play-label">Tempo simulado</div><div class="timecode" id="timeVal">00:00.00</div></div>
     <div class="run-group"><span class="play-label">Vel.</span><input class="speed" id="speedControl" type="range" min="0.1" max="3" step="0.1" value="1"><span class="range-num" id="speedText">1.0×</span></div>
-    <div class="stats"><div class="stat"><span>Pivôs</span><strong id="numNodes">0</strong></div><div class="stat"><span>Barras</span><strong id="numBars">0</strong></div><div class="stat"><span>Rodas</span><strong id="numGears">0</strong></div><div class="stat"><span>Erro máx.</span><strong id="residual">0,0 mm</strong></div></div>
+    <div class="stats"><div class="stat"><span>Pivôs</span><strong id="numNodes">0</strong></div><div class="stat"><span>Barras</span><strong id="numBars">0</strong></div><div class="stat"><span>Rodas</span><strong id="numGears">0</strong></div><div class="stat stat-joints"><span>Uniões</span><strong id="numJoints">0</strong></div><div class="stat"><span>Erro máx.</span><strong id="residual">0,0 mm</strong></div></div>
   </div>
 </main>
 <aside class="right" id="inspector">
   <div class="inspector-head"><div class="overline">Editor paramétrico</div><h2 id="inspectorTitle">Propriedades</h2><p id="inspectorSubtitle">Selecione um componente para modificar seus parâmetros.</p></div>
   <div id="properties"><div class="placeholder">Clique em um pivô, barra, roda ou cremalheira para editar suas propriedades.</div></div>
-  <div class="status-box"><strong>Cinemática · montagem e transmissão no plano</strong><br>Cremalheiras orientáveis, pinhão comum e cadeias de engrenagens; verificação de curso. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
+  <div class="status-box"><strong>Cinemática · montagem e transmissão no plano</strong><br>Juntas por portas compatíveis, pivô-pivô, pivô-cremalheira, pinhão e pantógrafo; verificação de curso e resíduos. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
   <div class="footer-note">Dica: <span class="kbd">Esc</span> cancela a operação · <span class="kbd">Espaço</span> inicia/pausa · <span class="kbd">Del</span> exclui seleção.</div>
 </aside>
 </div>
@@ -87,6 +88,7 @@
 </div></div></div>
 <div class="modal-back" id="helpModal"><div class="modal"><div class="modal-top"><div><div class="overline">Guia rápido</div><h2>Como construir um mecanismo</h2></div><button class="btn mini" data-close="helpModal">✕ Fechar</button></div>
 <p><b>1. Posicione os apoios.</b> Selecione «Apoio fixo» e clique na área. Use «Pivô livre» para articulações móveis. Com «Barra rígida», clique em dois pivôs; também é possível clicar em um espaço vazio para criar o pivô automaticamente.</p>
+<p><b>Juntas por pontos (J):</b> selecione a ferramenta <b>Unir pontos</b>, toque em uma das portas destacadas e depois na outra. As cremalheiras têm portas no início, centro, fim e no ponto dourado ajustável. É possível conectar a extremidade de uma barra a uma cremalheira, ao pivô de um pantógrafo ou ao eixo de uma engrenagem; pontos móveis conectados ao trilho podem também deslocá-lo ao serem arrastados. As ligações são guardadas no JSON V6. Portas incompatíveis ou que deformem barras são recusadas, com diagnóstico. Use J como atalho. <b>Importante:</b> conectar um pivô a um eixo fixo não aciona a rotação da engrenagem; para isso use a ferramenta de pino excêntrico.</p>
 <p><b>2. Restrinja movimentos.</b> Com «Guia linear», clique em um pivô e altere o ângulo da guia no painel de propriedades. Com «Engrenagem» ou «Polia», clique para criar uma roda. «Engrenar» e «Correia» conectam pares de rodas; o editor ajusta a distância entre centros para engrenagens isoladas.</p>
 <p><b>Pantógrafo em 3 passos:</b> clique em «Criar pantógrafo», escolha 1–6 estágios e confirme. O módulo é adicionado ao projeto atual; no modo Testar, arraste ↕ para expandir, ✥ para reposicionar e ⤾ para girar, sem alterar outros objetos. As barras cruzadas se conectam pelo pivô central de cada X; os extremos adjacentes compartilham juntas. Para montar manualmente um X, crie os quatro cantos, um pivô central, quatro meias-barras e guias/alinhamentos para restringir as extremidades.</p>
 <p><b>Cremalheira giratória e transmissão encadeada:</b> abra «Duas cremalheiras a 90°». Arraste qualquer trilho: o pinhão gira e transmite deslocamento ao outro. Selecione um trilho e arraste o <b>círculo laranja ⤾</b> para girá-lo; ou use a ferramenta «Rotacionar» (R). O engrenamento mantém o contato tangencial. Edite também o ângulo e o lado de contato (um lado move no sentido contrário do outro) no inspetor.</p>
@@ -97,7 +99,7 @@
 <p><b>Posicionamento e alinhamento:</b> no modo Testar (V), arraste o corpo da cremalheira para deslocá-la na guia, a borda da engrenagem para girá-la, e o centro da engrenagem para reposicionar o conjunto. Com G, mova um conjunto de peças conectadas mantendo suas distâncias; com R, gire a peça ou o pantógrafo. Para alinhar centros X ou Y, selecione o primeiro objeto, <b>Shift+clique</b> no segundo e pressione Alinhar X/Y. Também é possível clicar em Alinhar X/Y e depois clicar nos dois objetos.</p>
 <p><b>4. Simule, inspecione e salve.</b> Use «Iniciar», arraste os pivôs com a simulação pausada, altere dimensões e exporte/importa arquivos JSON. «SVG» salva uma imagem vetorial da cena.</p>
 <p><b>Interpretação:</b> a simulação resolve restrições geométricas por iterações, sem forças ou inércia. Configurações sobreconstrangidas, singularidades, interferências ou cadeias sem fechamento podem produzir erros; observe o indicador «Erro máx.». Forças de molas reais, cames, contato físico entre dentes, colisão, análise de esforços e modelos 3D não estão implementados nesta V4.</p>
-<p><b>Teclas:</b> V testar, G mover, R rotacionar, Shift+clique selecionar 2, P pivô, F apoio, B barra, S guia, M motor, Espaço reproduzir, Esc cancelar, Delete apagar seleção. No celular, use a faixa de ferramentas inferior; toque em «☷» para ver propriedades.</p>
+<p><b>Teclas:</b> V testar, G mover, R rotacionar, J unir pontos, Shift+clique selecionar 2, P pivô, F apoio, B barra, S guia, M motor, Espaço reproduzir, Esc cancelar, Delete apagar seleção. No celular, use a faixa de ferramentas inferior; toque em «☷» para ver propriedades.</p>
 </div></div>
 <div class="modal-back" id="scissorModal"><div class="modal"><div class="modal-top"><div><div class="overline">Construtor guiado</div><h2>Monte um pantógrafo</h2><p>O editor cria barras cruzadas em X e pivôs compartilhados, formando um módulo livre. O novo módulo será incorporado ao desenho atual, sem apagá-lo. Arraste o controle de abertura, o centro para deslocar e a alça circular para girar.</p></div><button class="btn mini" data-close="scissorModal">✕ Fechar</button></div>
 <div class="scissor-fields"><label>Estágios (X)<input id="scissorStages" type="number" value="3" min="1" max="6" step="1"></label><label>Largura inicial de cada X (mm)<input id="scissorWidth" type="number" value="110" min="55" max="210" step="5"></label><label>Altura inicial do X (mm)<input id="scissorHeight" type="number" value="140" min="65" max="240" step="5"></label></div>
