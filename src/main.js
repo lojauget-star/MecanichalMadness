@@ -1,6 +1,6 @@
 
 'use strict';
-// KINÉTIKA V4 | Editor e solucionador cinemático bidimensional, sem dependências externas.
+// KINÉTIKA V5 | Editor e solucionador cinemático 2D com juntas de coincidência e âncoras móveis.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
 const TAU=Math.PI*2, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, RACK_CLEARANCE=9;
@@ -8,15 +8,17 @@ const fmt=(n,d=1)=>Number.isFinite(n)?Number(n).toLocaleString('pt-BR',{minimumF
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const dot=(a,b)=>a.x*b.x+a.y*b.y;
 const normDeg=d=>((d+180)%360+360)%360-180;
-let M,sel=null,multi=[],tool='select',pending=null,drag=null,manualDrive=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
+let M,sel=null,multi=[],tool='select',pending=null,drag=null,manualDrive=null,snapCandidate=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
 let cam={x:0,y:0,scale:1.5},view={x:-300,y:-220,w:600,h:440};
-const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
+const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],pinLinks:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
 const idFor=pre=>pre+(M.next++);
 const node=id=>M.nodes.find(n=>n.id===id);
 const bar=id=>M.bars.find(b=>b.id===id);
 const gear=id=>M.gears.find(g=>g.id===id);
 const rack=id=>M.racks.find(r=>r.id===id);
 const scissor=id=>M.scissors?.find(x=>x.id===id);
+const rackLink=id=>M.pinLinks?.find(l=>l.rackId===id)||null;
+const scissorLink=id=>M.pinLinks?.find(l=>l.scissorId===id)||null;
 function scissorForNode(id){return M.scissors?.find(g=>[...g.topIds,...g.bottomIds,...g.centerIds].includes(id))||null}
 function scissorForBar(id){const b=bar(id);return b&&(scissorForNode(b.a)||scissorForNode(b.b))}
 function groupForTarget(o){if(!o)return null;if(o.type==='scissor')return scissor(o.id);if(o.type==='node')return scissorForNode(o.id);if(o.type==='bar')return scissorForBar(o.id);return null}
@@ -53,6 +55,7 @@ function connectedNodeIds(o){const seen=new Set(entityNodeIds(o)),todo=[...seen]
   for(const gm of M.mates){const ga=gear(gm.a),gb=gear(gm.b);if(ga&&gb){if(ga.node===id)adj.push(gb.node);if(gb.node===id)adj.push(ga.node)}}
   for(const r of M.racks){const g=gear(r.gearId);if(g){if(g.node===id)adj.push(r.node);if(r.node===id)adj.push(g.node)}}
   for(const n of M.nodes){if(n.follower?.gear&&gear(n.follower.gear)?.node===id)adj.push(n.id);if(n.id===id&&n.follower?.gear)adj.push(gear(n.follower.gear).node)}
+  for(const l of M.pinLinks||[]){const r=rack(l.rackId),g=scissor(l.scissorId);if(!r||!g)continue;if(r.node===id)adj.push(g.driveId);if(g.driveId===id)adj.push(r.node)}
   const sc=scissorForNode(id);if(sc)adj.push(...sc.topIds,...sc.bottomIds,...sc.centerIds);
   for(const a of adj)if(a&&!seen.has(a)){seen.add(a);todo.push(a)}
  }
@@ -81,12 +84,57 @@ const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 function addNode(x,y,opt={}){const n={id:idFor('n'),x,y,fixed:false,slider:null,follower:null,motor:null,...opt};M.nodes.push(n);return n}
 function addBar(a,b,opt={}){if(a.id===b.id){toast('Escolha dois pivôs diferentes.',true);return null} if(M.bars.some(v=>(v.a===a.id&&v.b===b.id)||(v.a===b.id&&v.b===a.id))){toast('Esses pivôs já estão ligados.',true);return null}const item={id:idFor('b'),a:a.id,b:b.id,length:dist(a,b),motor:null,...opt};M.bars.push(item);return item}
 function addGear(x,y,type='gear',teeth=24,module=3.5){let n=addNode(x,y,{fixed:true});const g={id:idFor('g'),node:n.id,type,teeth,module,radius:teeth*module/2,angle:0,baseAngle:0,motor:null};M.gears.push(g);return g}
-function addRack(x,y){let n=addNode(x,y,{slider:{ox:x,oy:y,angle:0,range:520}});const r={id:idFor('r'),node:n.id,length:190,gearId:null,offset:0,side:1};M.racks.push(r);return r}
+function addRack(x,y){let n=addNode(x,y,{slider:{ox:x,oy:y,angle:0,range:520}});const r={id:idFor('r'),node:n.id,length:190,gearId:null,offset:0,side:1,anchorX:0};M.racks.push(r);return r}
 // Cremalheira: q é deslocamento ESCALAR ao longo da guia (não coordenada X).
 // θ é rotação no plano, u=(cosθ,sinθ), n=(-sinθ,cosθ).
 // Para rolamento sem deslizamento em contato lateral s: q + s*r*φ = const.
 // Limite de contato: o ponto de tangência precisa permanecer nos dentes da barra.
 function rackMotionHalf(r){const ss=node(r.node).slider;return r.gearId?Math.min(ss.range/2,Math.max(0,r.length/2-16)):ss.range/2}
+function rackAnchor(r){const n=node(r.node),{u}=rackAxes(r);return {x:n.x+u.x*(r.anchorX||0),y:n.y+u.y*(r.anchorX||0)}}
+function scissorHeightLimits(g){return {lo:Math.max(20,g.diagonal*.20),hi:g.diagonal*.985}}
+function rackLinkQBounds(r){const l=rackLink(r.id);if(!l)return {lo:-Infinity,hi:Infinity};const g=scissor(l.scissorId);if(!g)return {lo:-Infinity,hi:Infinity};const b=scissorHeightLimits(g);return {lo:l.q0+b.lo-l.h0,hi:l.q0+b.hi-l.h0}}
+function rackAllowedQ(r){const half=rackMotionHalf(r),b=rackLinkQBounds(r);return {lo:Math.max(-half,b.lo),hi:Math.min(half,b.hi)}}
+// União real: a origem superior do pantógrafo fica fixa, e o ponto inferior
+// se movimenta na mesma reta que a guia da cremalheira. Não é simples alinhamento.
+function attachRackScissor(r,g){
+ if(!r||!g||rackLink(r.id)||scissorLink(g.id))return false;
+ const s=node(r.node)?.slider;if(!s)return false;
+ // O ponto móvel do pantógrafo exige que a guia da cremalheira seja paralela ao eixo local V.
+ g.angle=normDeg(s.angle-90);const {v}=localAxes(g.angle),a=rackAnchor(r);
+ g.x=a.x-g.height*v.x;g.y=a.y-g.height*v.y;
+ const l={id:idFor('j'),rackId:r.id,scissorId:g.id,q0:rackQ(r),h0:g.height};
+ M.pinLinks.push(l);placeScissor(g);return true;
+}
+function detachPinLink(id){const l=(M.pinLinks||[]).find(a=>a.id===id);if(!l)return;M.pinLinks=M.pinLinks.filter(a=>a.id!==id);toast('Articulação desfeita. Os componentes voltaram a ser independentes.');}
+function rebaseRackAnchor(r){const l=rackLink(r.id);if(!l)return;const g=scissor(l.scissorId);if(!g)return;const a=rackAnchor(r),v=localAxes(g.angle).v;l.q0=rackQ(r);l.h0=g.height;g.x=a.x-g.height*v.x;g.y=a.y-g.height*v.y;placeScissor(g)}
+function setRackAnchor(r,x){r.anchorX=clamp(x,-r.length/2+6,r.length/2-6);rebaseRackAnchor(r)}
+function applyPinLinks(){for(const l of M.pinLinks||[]){const r=rack(l.rackId),g=scissor(l.scissorId);if(!r||!g)continue;const {lo,hi}=scissorHeightLimits(g);g.height=clamp(l.h0+rackQ(r)-l.q0,lo,hi)}}
+function bestSnapCandidate(maxRadius=20/cam.scale){let best=null,bestD=maxRadius;
+ for(const r of M.racks)for(const g of M.scissors||[]){
+  if(rackLink(r.id)||scissorLink(g.id))continue;
+  const ap=rackAnchor(r),dp=node(g.driveId);if(!dp)continue;
+  const d=dist(ap,dp);if(d<bestD){bestD=d;best={kind:'pin',rackId:r.id,scissorId:g.id,point:ap,distance:d}}
+ }
+ return best;
+}
+function eligibleFreePivot(id){const n=node(id);return !!(n&&!n.fixed&&!n.slider&&!n.follower&&!scissorForNode(id)&&!M.gears.some(g=>g.node===id)&&!M.racks.some(r=>r.node===id))}
+function eligibleSnapPivot(id){const n=node(id);return !!(n&&!n.follower&&!scissorForNode(id)&&!M.gears.some(g=>g.node===id)&&!M.racks.some(r=>r.node===id))}
+function bestPivotSnap(sourceId,radius=20/cam.scale){if(!eligibleFreePivot(sourceId))return null;const from=node(sourceId);let best=null,dmin=radius;
+ for(const to of M.nodes){if(to.id===sourceId||!eligibleSnapPivot(to.id))continue;const d=dist(from,to);if(d<dmin){dmin=d;best={kind:'pivot',sourceId,targetId:to.id,point:{x:to.x,y:to.y},distance:d}}}
+ return best;
+}
+function mergeCoincidentPivots(sourceId,targetId){if(!eligibleFreePivot(sourceId)||!eligibleSnapPivot(targetId))return false;
+ const a=node(sourceId),b=node(targetId);if(!a||!b)return false;
+ const backup=JSON.stringify(M);a.x=b.x;a.y=b.y;
+ for(const bar of M.bars){if(bar.a===sourceId)bar.a=targetId;if(bar.b===sourceId)bar.b=targetId}
+ M.bars=M.bars.filter(bar=>bar.a!==bar.b);
+ for(const align of M.aligns){if(align.a===sourceId)align.a=targetId;if(align.b===sourceId)align.b=targetId}
+ M.aligns=M.aligns.filter(c=>c.a!==c.b);M.nodes=M.nodes.filter(n=>n.id!==sourceId);
+ const err=solve(260);if(err>2||!Number.isFinite(err)){
+   M=JSON.parse(backup);solve(120);toast('Pivôs próximos, mas unir deformaria as barras existentes. Ajuste a geometria.',true);return false;
+ }
+ toast('◉ Pivôs unidos: agora compartilham uma única articulação.');return true;
+}
 function rackAxes(r){const a=rad(node(r.node).slider.angle);return {u:{x:Math.cos(a),y:Math.sin(a)},v:{x:-Math.sin(a),y:Math.cos(a)}}}
 function rackQ(r){const n=node(r.node),s=n.slider,u=rackAxes(r).u;return dot({x:n.x-s.ox,y:n.y-s.oy},u)}
 function placeRack(r){const n=node(r.node),s=n.slider,{u,v}=rackAxes(r),g=r.gearId?gear(r.gearId):null;
@@ -107,6 +155,7 @@ function rotateRack(r,angle){
   s.angle=normDeg(angle);
   if(r.gearId){const g=gear(r.gearId);if(g){r.offset=oldQ+r.side*g.radius*g.angle;placeRack(r)}}
   else {const {u}=rackAxes(r);s.ox=oldPos.x-oldQ*u.x;s.oy=oldPos.y-oldQ*u.y;placeRack(r)}
+  const link=rackLink(r.id);if(link){const g=scissor(link.scissorId);if(g){g.angle=normDeg(s.angle-90);rebaseRackAnchor(r)}}
 }
 function flipRackSide(r,side){if(!r.gearId){r.side=side;return}const q=rackQ(r),g=gear(r.gearId);r.side=side;r.offset=q+side*g.radius*g.angle;placeRack(r)}
 function disconnectRack(r){const n=node(r.node);r.gearId=null;r.offset=0;n.slider.ox=n.x;n.slider.oy=n.y;r.side=1}
@@ -122,10 +171,10 @@ function gearRelations(root){
   return relation;
 }
 function boundGearAngle(root,requested,relation){let lo=-Infinity,hi=Infinity;
-  for(const r of M.racks){const v=relation.get(r.gearId);if(!v)continue;const g=gear(r.gearId),s=node(r.node).slider;
-    const c=-(r.side||1)*g.radius*v.a, b=r.offset-(r.side||1)*g.radius*v.b,half=rackMotionHalf(r);
-    if(Math.abs(c)<1e-12){if(Math.abs(b)>half+1e-4)return {value:requested,invalid:true};continue}
-    const x=(-half-b)/c,y=(half-b)/c;lo=Math.max(lo,Math.min(x,y));hi=Math.min(hi,Math.max(x,y));
+  for(const r of M.racks){const v=relation.get(r.gearId);if(!v)continue;const g=gear(r.gearId);
+    const c=-(r.side||1)*g.radius*v.a, b=r.offset-(r.side||1)*g.radius*v.b,range=rackAllowedQ(r);
+    if(Math.abs(c)<1e-12){if(b<range.lo-1e-4||b>range.hi+1e-4)return {value:requested,invalid:true};continue}
+    const x=(range.lo-b)/c,y=(range.hi-b)/c;lo=Math.max(lo,Math.min(x,y));hi=Math.min(hi,Math.max(x,y));
   }
   return lo>hi?{value:requested,invalid:true}:{value:clamp(requested,lo,hi),limited:requested<lo-1e-7||requested>hi+1e-7};
 }
@@ -207,7 +256,7 @@ function updateGears(){
     for(const [id,v] of rel){const g=gear(id);g.angle=v.a*root.angle+v.b;}
   }
 }
-function clampManualRack(q,r){const h=rackMotionHalf(r);return clamp(q,-h,h)}
+function clampManualRack(q,r){const lim=rackAllowedQ(r);return clamp(q,lim.lo,lim.hi)}
 function solve(iter=200){
   updateGears();const locks=new Map();
   for(const n of M.nodes)if(n.fixed)lockPos(n,locks);
@@ -216,6 +265,7 @@ function solve(iter=200){
   for(const n of M.nodes)if(n.motor&&n.slider){const s=n.slider,an=rad(s.angle),q=n.motor.type==='spring'?(n.motor.targetOffset+(n.motor.startOffset-n.motor.targetOffset)*Math.exp(-t/Math.max(n.motor.tau,.05))):n.motor.amplitude*Math.sin(rad(n.motor.rpm*6)*t+n.motor.phase);const x=s.ox+q*Math.cos(an),y=s.oy+q*Math.sin(an);n.x=x;n.y=y;locks.set(n.id,{x,y})}
   for(const r of M.racks){const n=node(r.node);if(r.gearId&&gear(r.gearId)){placeRack(r);locks.set(n.id,{x:n.x,y:n.y})}
     else if(manualDrive?.kind==='rack'&&manualDrive.id===r.id){const q=clampManualRack(manualDrive.q,r),{u}=rackAxes(r),s=n.slider;n.x=s.ox+q*u.x;n.y=s.oy+q*u.y;locks.set(n.id,{x:n.x,y:n.y})}}
+  applyPinLinks();
   if(manualDrive?.kind==='bar'){const b=bar(manualDrive.id);if(b){const a=node(b.a),z=node(b.b),anchor=manualDrive.anchor==='b'?z:a,moved=manualDrive.anchor==='b'?a:z,dir=manualDrive.anchor==='b'?-1:1;
     moved.x=anchor.x+dir*b.length*Math.cos(manualDrive.angle);moved.y=anchor.y+dir*b.length*Math.sin(manualDrive.angle);locks.set(moved.id,{x:moved.x,y:moved.y});if(!anchor.fixed)locks.set(anchor.id,{x:anchor.x,y:anchor.y})}}
 
@@ -238,6 +288,7 @@ function solve(iter=200){
   }
   maxResidual=0;for(const b of M.bars)maxResidual=Math.max(maxResidual,lenErr(b));for(const a of M.aligns){let na=node(a.a),nb=node(a.b);if(na&&nb)maxResidual=Math.max(maxResidual,Math.abs(na[a.axis]-nb[a.axis]))}
   for(const r of M.racks)if(r.gearId){const g=gear(r.gearId),rn=node(r.node);if(g&&rn){const {u,v}=rackAxes(r),c=node(g.node),d={x:rn.x-c.x,y:rn.y-c.y};maxResidual=Math.max(maxResidual,Math.abs(r.offset-(r.side||1)*g.radius*g.angle-dot({x:rn.x-rn.slider.ox,y:rn.y-rn.slider.oy},u)));maxResidual=Math.max(maxResidual,Math.abs(dot(d,v)-(r.side||1)*(g.radius+RACK_CLEARANCE)))}}
+  for(const l of M.pinLinks||[]){const rr=rack(l.rackId),gg=scissor(l.scissorId);if(rr&&gg){const a=rackAnchor(rr),d=node(gg.driveId);if(d)maxResidual=Math.max(maxResidual,dist(a,d));}}
   for(const m of M.mates)if(m.type==='gear'){const a=gear(m.a),b=gear(m.b);if(a&&b)maxResidual=Math.max(maxResidual,Math.abs(dist(node(a.node),node(b.node))-a.radius-b.radius),Math.abs(a.module-b.module))}
   return maxResidual;
 }
@@ -288,6 +339,18 @@ function sceneSVG(){
     if(drive){s+=`<circle data-kind="scissor-drive" data-id="${gg.id}" cx="${drive.x}" cy="${drive.y}" r="${14/cam.scale+2}" fill="#6b4f29" stroke="#ffd38e" stroke-width="2.5"/><text x="${drive.x}" y="${drive.y+4}" text-anchor="middle" font-size="12" fill="#fff1d2" pointer-events="none">↕</text>`}
     s+=`<text x="${mid.x+20}" y="${mid.y-15}" font-size="10" fill="#a9dacb" pointer-events="none">${gg.stages} X · ${fmt(gg.angle,0)}°</text>`;
   }
+  // Âncoras móveis: sempre visíveis sobre o corpo dentado; ficam soldadas à cremalheira.
+  for(const r of M.racks){const a=rackAnchor(r),n=node(r.node),hi=sel?.type==='rack'&&sel.id===r.id,connected=!!rackLink(r.id);
+    if(Math.abs(r.anchorX||0)>1)s+=`<line x1="${n.x}" y1="${n.y}" x2="${a.x}" y2="${a.y}" stroke="#dcb885" stroke-width="1.4" stroke-dasharray="3 3" pointer-events="none"/>`;
+    s+=`<circle data-kind="rack-anchor" data-id="${r.id}" cx="${a.x}" cy="${a.y}" r="${Math.max(8,11/cam.scale)}" stroke="${connected?'#91f0c5':'#f4c986'}" stroke-width="${hi?3.4:2.5}" fill="#203b41"/>`;
+    s+=`<circle cx="${a.x}" cy="${a.y}" r="3.3" fill="${connected?'#91f0c5':'#f4c986'}" pointer-events="none"/>`;
+  }
+  for(const l of M.pinLinks||[]){const r=rack(l.rackId),g=scissor(l.scissorId);if(!r||!g)continue;const a=rackAnchor(r),d=node(g.driveId),b=node(g.topIds[0]);if(!d||!b)continue;
+    s+=`<circle cx="${a.x}" cy="${a.y}" r="${15/cam.scale+3}" fill="none" stroke="#93f6cf" stroke-width="2" stroke-dasharray="5 4" pointer-events="none"/>`;
+    s+=`<circle cx="${b.x}" cy="${b.y}" r="6" fill="#173d46" stroke="#95bdc9" stroke-width="2" pointer-events="none"/>`;
+    s+=`<circle data-kind="scissor-drive" data-id="${g.id}" cx="${d.x}" cy="${d.y}" r="${Math.max(11,14/cam.scale)}" fill="#24524c" stroke="#a4ffd6" stroke-width="3"/><text x="${d.x}" y="${d.y+5}" font-size="14" text-anchor="middle" fill="white" pointer-events="none">↕</text>`;
+  }
+  if(snapCandidate){const a=snapCandidate.point;s+=`<circle cx="${a.x}" cy="${a.y}" r="${20/cam.scale}" fill="#9cf5b6" fill-opacity=".16" stroke="#b5ffde" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none"/><text x="${a.x+18/cam.scale}" y="${a.y-18/cam.scale}" fill="#ddffef" font-size="${12/cam.scale}" pointer-events="none">SOLTAR PARA CONECTAR</text>`;}
   if(multi.length){for(const item of multi){const pos=entityPosition(item);if(pos)s+=`<circle cx="${pos.x}" cy="${pos.y}" r="${20/cam.scale+4}" stroke="#f7bf76" stroke-width="2.5" fill="none" pointer-events="none"/>`}}
   if(pending){const first=pending.id,kind=pending.kind;let p0=kind==='object'?entityPosition(pending):kind==='gear'?node(gear(first)?.node):kind==='rack'?node(rack(first)?.node):node(first);if(p0){s+=`<line x1="${p0.x}" y1="${p0.y}" x2="${pointer.x}" y2="${pointer.y}" stroke="#f6c17f" stroke-width="2" stroke-dasharray="8 5" pointer-events="none"/><circle cx="${p0.x}" cy="${p0.y}" r="13" fill="none" stroke="#f6c17f" stroke-width="2" pointer-events="none"/>`}}
   return s;
@@ -306,6 +369,7 @@ function renderProperties(){const p=$('properties'),h=$('inspectorTitle'),sub=$(
     item=scissor(sel.id);if(!item){select(null);return}
     h.textContent='Pantógrafo '+item.id.toUpperCase();sub.textContent='Módulo integrado ao projeto. Arraste ✥ para mover, ⤾ para girar e ↕ para variar a abertura.';
     html='<div class="prop-group"><div class="prop-title">Posição e geometria</div>'+optRow('Origem X (mm)','scX',fmtRaw(item.x))+optRow('Origem Y (mm)','scY',fmtRaw(item.y))+optRow('Rotação (°)','scAngle',fmtRaw(item.angle))+optRow('Altura do X (mm)','scHeight',fmtRaw(item.height))+`<div class="tips">${item.stages} estágios · diagonal ${fmt(item.diagonal,1)} mm · largura atual por X ${fmt(scissorWidth(item),1)} mm</div></div>`;
+    const link=scissorLink(item.id);if(link)html+=`<div class="prop-group"><div class="prop-title">Articulação ativa</div><div class="tips">Acoplado à cremalheira ${str(link.rackId.toUpperCase())}. Arraste ↕ para movimentar o pinhão. O apoio inicial fica ancorado.</div><div class="prop-btns"><button class="btn mini" data-act="unlinkPin">Desfazer união</button></div></div>`;
   }
   else if(sel.type==='rack'){item=rack(sel.id);if(!item){select(null);return}
     h.textContent='Cremalheira '+item.id.toUpperCase();sub.textContent=item.gearId?'Transmissão bidirecional sem escorregamento. Gire a orientação sem perder contato tangencial.':'Trilho dentado orientável; arraste, gire ou acople a um pinhão.';
@@ -315,6 +379,8 @@ function renderProperties(){const p=$('properties'),h=$('inspectorTitle'),sub=$(
       `<label class="field"><span>Lado de engrenamento</span><select data-prop="rackSide"><option value="1" ${item.side===1?'selected':''}>Lado +</option><option value="-1" ${item.side===-1?'selected':''}>Lado −</option></select></label>`+
       `<div class="tips">Gire pelo ⤾ no desenho ou use R. O lado muda o sentido da transmissão. Curso efetivo de engrenamento: ±${fmt(rackMotionHalf(item),1)} mm. ${g?'Pinhão: '+g.id.toUpperCase()+' · relação dx/dφ = '+fmt(-(item.side||1)*g.radius,1)+' mm/rad.':''}</div></div>`+
       '<div class="prop-group"><div class="prop-title">Dimensões e curso</div>'+optRow('Comprimento (mm)','length',item.length)+optRow('Curso da guia (mm)','rackRange',ss.range,10,'number','50')+'<div class="tips">O limite mais restritivo entre a guia e a extensão dentada prevalece.</div></div>';
+    html+=`<div class="prop-group"><div class="prop-title">Ponto de conexão · deslizável</div><div class="tips">Arraste o ponto dourado diretamente na cremalheira ou selecione uma posição. Ele permanece solidário à barra durante a translação.</div><input class="slider-rack" data-anchor-slider="${item.id}" aria-label="Posição do ponto de conexão" type="range" min="${-item.length/2+6}" max="${item.length/2-6}" step="1" value="${item.anchorX||0}">${optRow('Posição a partir do centro (mm)','anchorX',fmtRaw(item.anchorX||0))}<div class="prop-btns"><button class="btn mini" data-act="anchorStart">◂ Início</button><button class="btn mini" data-act="anchorCenter">⊙ Centro</button><button class="btn mini" data-act="anchorEnd">Fim ▸</button></div></div>`;
+    const link=rackLink(item.id);if(link)html+=`<div class="prop-group"><div class="prop-title">Junta cinemática ativa</div><div class="tips">Ligada ao pantógrafo ${str(link.scissorId.toUpperCase())}. O curso fica limitado pela abertura possível do X.</div><div class="prop-btns"><button class="btn mini" data-act="unlinkPin">Desfazer união</button></div></div>`;
     if(item.gearId)html+='<div class="prop-btns"><button class="btn mini" data-act="disconnectRack">Desacoplar pinhão</button></div>';
   }
   if(item?.motor)html+='<div class="prop-btns"><button class="btn mini warn" data-act="stopMotor">⏹ Remover acionamento</button></div>';
@@ -349,18 +415,19 @@ function applyProperty(field,value,checked){if(!sel)return;let obj=sel.type==='n
     if(field==='teeth')obj.teeth=Math.round(clamp(val,8,100));
     if(field==='module')obj.module=clamp(val,.5,10);
     if(['teeth','module'].includes(field)){obj.radius=obj.teeth*obj.module/2;for(let m of M.mates){const a=gear(m.a),b=gear(m.b);m.phase=b.angle-(m.type==='gear'?-1:1)*(a.radius/b.radius)*a.angle}for(let r of M.racks)if(r.gearId===obj.id){const q=rackQ(r);r.offset=q+(r.side||1)*obj.radius*obj.angle;placeRack(r)}}
-  }else if(sel.type==='scissor'){if(field==='scX')obj.x=val;if(field==='scY')obj.y=val;if(field==='scAngle')obj.angle=normDeg(val);if(field==='scHeight')obj.height=clamp(val,Math.min(25,obj.diagonal*.22),obj.diagonal*.98);placeScissor(obj);
-  }else if(sel.type==='rack'){if(field==='rackX'||field==='rackY'){const n=node(obj.node);translateAssembly(sel,field==='rackX'?val-n.x:0,field==='rackY'?val-n.y:0)}if(field==='length')obj.length=Math.max(40,val);if(field==='rackRange')node(obj.node).slider.range=Math.max(50,val);if(field==='rackAngle')rotateRack(obj,val);if(field==='rackSide')flipRackSide(obj,val>=0?1:-1)}
+  }else if(sel.type==='scissor'){const l=scissorLink(obj.id);if(l&&['scX','scY','scAngle','scHeight'].includes(field)){toast('A junta está conectada. Arraste o ponto ↕ para acionar ou desfaça a união para editar a geometria.',true);renderProperties();return}if(field==='scX')obj.x=val;if(field==='scY')obj.y=val;if(field==='scAngle')obj.angle=normDeg(val);if(field==='scHeight')obj.height=clamp(val,Math.min(25,obj.diagonal*.22),obj.diagonal*.98);placeScissor(obj);
+  }else if(sel.type==='rack'){if(field==='rackX'||field==='rackY'){const n=node(obj.node);translateAssembly(sel,field==='rackX'?val-n.x:0,field==='rackY'?val-n.y:0)}if(field==='length')obj.length=Math.max(40,val);if(field==='rackRange')node(obj.node).slider.range=Math.max(50,val);if(field==='rackAngle')rotateRack(obj,val);if(field==='rackSide')flipRackSide(obj,val>=0?1:-1);if(field==='anchorX')setRackAnchor(obj,val)}
   solve();render();if(['module','teeth','sliderAngle','length','fixed','rackRange','rackAngle','rackSide','barAngle','gearX','gearY','gearAngle','rackX','rackY','scX','scY','scAngle','scHeight'].includes(field))renderProperties();
 }
 function deleteItem(type,id){
  const group=groupForTarget({type,id});
- if(group){const ids=new Set([...group.topIds,...group.bottomIds,...group.centerIds]);M.nodes=M.nodes.filter(n=>!ids.has(n.id));M.bars=M.bars.filter(b=>!ids.has(b.a)&&!ids.has(b.b));M.aligns=M.aligns.filter(a=>!ids.has(a.a)&&!ids.has(a.b));M.scissors=M.scissors.filter(g=>g.id!==group.id);select(null);solve();render();toast('Módulo pantográfico removido.');return}
+ if(group){M.pinLinks=M.pinLinks.filter(l=>l.scissorId!==group.id);const ids=new Set([...group.topIds,...group.bottomIds,...group.centerIds]);M.nodes=M.nodes.filter(n=>!ids.has(n.id));M.bars=M.bars.filter(b=>!ids.has(b.a)&&!ids.has(b.b));M.aligns=M.aligns.filter(a=>!ids.has(a.a)&&!ids.has(a.b));M.scissors=M.scissors.filter(g=>g.id!==group.id);select(null);solve();render();toast('Módulo pantográfico removido.');return}
 
-  if(type==='node'){M.bars=M.bars.filter(b=>b.a!==id&&b.b!==id);M.gears=M.gears.filter(g=>g.node!==id);M.racks=M.racks.filter(r=>r.node!==id);M.aligns=M.aligns.filter(a=>a.a!==id&&a.b!==id);M.nodes=M.nodes.filter(n=>n.id!==id);M.nodes=M.nodes.filter(n=>!n.follower||M.gears.some(g=>g.id===n.follower.gear))}
+  if(type==='node'){M.pinLinks=M.pinLinks.filter(l=>rack(l.rackId)?.node!==id);M.bars=M.bars.filter(b=>b.a!==id&&b.b!==id);M.gears=M.gears.filter(g=>g.node!==id);M.racks=M.racks.filter(r=>r.node!==id);M.aligns=M.aligns.filter(a=>a.a!==id&&a.b!==id);M.nodes=M.nodes.filter(n=>n.id!==id);M.nodes=M.nodes.filter(n=>!n.follower||M.gears.some(g=>g.id===n.follower.gear))}
   if(type==='bar')M.bars=M.bars.filter(b=>b.id!==id);
   if(type==='gear'){M.gears=M.gears.filter(g=>g.id!==id);M.nodes=M.nodes.filter(n=>!n.follower||n.follower.gear!==id);M.racks.forEach(r=>{if(r.gearId===id)disconnectRack(r)})}
-  if(type==='rack')M.racks=M.racks.filter(r=>r.id!==id);
+  if(type==='rack'){M.pinLinks=M.pinLinks.filter(l=>l.rackId!==id);M.racks=M.racks.filter(r=>r.id!==id)}
+  M.pinLinks=M.pinLinks.filter(l=>M.racks.some(r=>r.id===l.rackId)&&M.scissors.some(g=>g.id===l.scissorId));
   M.mates=M.mates.filter(m=>M.gears.some(g=>g.id===m.a)&&M.gears.some(g=>g.id===m.b));
   M.bars=M.bars.filter(b=>M.nodes.some(n=>n.id===b.a)&&M.nodes.some(n=>n.id===b.b));
   select(null);solve();render();
@@ -410,6 +477,7 @@ function onDown(e){
  const dom=e.target.closest?.('[data-kind]');
  let picked=hit(p);
  if(dom){const kind=dom.dataset.kind,id=dom.dataset.id;
+   if(kind==='rack-anchor')picked={type:'rack',id};
    if(kind==='scissor'||kind==='scissor-drive'||kind==='scissor-rotate')picked={type:'scissor',id};
    else if(kind==='gear'||kind==='rack'||kind==='bar')picked={type:kind,id};
    else if(kind==='node'){const n=node(id),gg=scissorForNode(id),rackOn=M.racks.find(r=>r.node===id),gearOn=M.gears.find(g=>g.node===id);
@@ -432,11 +500,12 @@ function onDown(e){
    if(kind==='scissor-drive'&&tool==='select')drag={kind:'scissorHeight',id:group.id,start:p,original:group.height};
    else if(kind==='scissor-rotate'||tool==='rotate'){
      const c=scissorCenter(group);drag={kind:'scissorRotate',id:group.id,startAngle:group.angle,center:c,pointerAngle:Math.atan2(p.y-c.y,p.x-c.x)};
-   }else drag={kind:'scissorMove',id:group.id,start:p,origin:{x:group.x,y:group.y}};
+   }else drag={kind:'scissorMove',id:group.id,start:p,previous:p,origin:{x:group.x,y:group.y}};
  }else if(picked.type==='rack'){
    const r=rack(picked.id),n=node(r.node),handle=hitRackRotate(p);
    select('rack',r.id);
-   if(tool==='rotate'||handle){drag={kind:'rackRotate',id:r.id,offset:rad(n.slider.angle)-(Math.atan2(p.y-n.y,p.x-n.x)+Math.PI/2)}}
+   if(kind==='rack-anchor'&&tool==='select'){drag={kind:'rackAnchor',id:r.id,start:p,origin:r.anchorX||0}}
+   else if(tool==='rotate'||handle){drag={kind:'rackRotate',id:r.id,offset:rad(n.slider.angle)-(Math.atan2(p.y-n.y,p.x-n.x)+Math.PI/2)}}
    else if(tool==='move'){drag={kind:'assemblyMove',target:{type:'rack',id:r.id},start:p,previous:p}}
    else drag={kind:'rack',id:r.id,start:p,origin:rackQ(r)};
  }else if(picked.type==='gear'){
@@ -488,16 +557,20 @@ function onMove(e){
  if(drag.kind==='assemblyMove'){
    const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;translateAssembly(drag.target,dx,dy);drag.previous=p;solve(100);render();
  }else if(drag.kind==='scissorMove'){
-   const g=scissor(drag.id);g.x=drag.origin.x+p.x-drag.start.x;g.y=drag.origin.y+p.y-drag.start.y;solve(100);render();
+   const g=scissor(drag.id);if(scissorLink(g.id)){const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;translateAssembly({type:'scissor',id:g.id},dx,dy);drag.previous=p;}else{g.x=drag.origin.x+p.x-drag.start.x;g.y=drag.origin.y+p.y-drag.start.y}solve(100);render();
  }else if(drag.kind==='scissorRotate'){
-   const g=scissor(drag.id),angle=Math.atan2(p.y-drag.center.y,p.x-drag.center.x);
+   const g=scissor(drag.id);if(scissorLink(g.id)){toast('Desfaça a união para rotacionar o pantógrafo isoladamente.',true);return;}const angle=Math.atan2(p.y-drag.center.y,p.x-drag.center.x);
    let next=drag.startAngle+deg(angle-drag.pointerAngle);if(e.shiftKey)next=Math.round(next/15)*15;
    const c0=scissorCenter(g);g.angle=normDeg(next);const c1=scissorCenter(g);g.x+=c0.x-c1.x;g.y+=c0.y-c1.y;solve(110);render();
  }else if(drag.kind==='scissorHeight'){
    const g=scissor(drag.id),{v}=localAxes(g.angle),change=dot({x:p.x-drag.start.x,y:p.y-drag.start.y},v);
-   g.height=clamp(drag.original+change,Math.max(20,g.diagonal*.20),g.diagonal*.985);solve(100);render();
+   const targetH=clamp(drag.original+change,...Object.values(scissorHeightLimits(g)));
+   const l=scissorLink(g.id);if(l){const r=rack(l.rackId);if(r)manualRackPosition(r,l.q0+targetH-l.h0)}else{g.height=targetH;solve(100);render();}
  }else if(drag.kind==='rack'){
    const r=rack(drag.id);manualRackPosition(r,drag.origin+dot({x:p.x-drag.start.x,y:p.y-drag.start.y},rackAxes(r).u));
+ }else if(drag.kind==='rackAnchor'){
+   const r=rack(drag.id),delta=dot({x:p.x-drag.start.x,y:p.y-drag.start.y},rackAxes(r).u);
+   setRackAnchor(r,drag.origin+delta);solve(100);render();
  }else if(drag.kind==='rackRotate'){
    const r=rack(drag.id),n=node(r.node);
    let angle=deg(Math.atan2(p.y-n.y,p.x-n.x)+Math.PI/2+drag.offset);
@@ -524,10 +597,16 @@ function onMove(e){
  }else if(drag.kind==='pan'){
    cam.x=drag.origin.x-(e.clientX-drag.start.x)/cam.scale;cam.y=drag.origin.y-(e.clientY-drag.start.y)/cam.scale;render();
  }
+ if(drag.kind==='node')snapCandidate=bestPivotSnap(drag.id);else if(['rackAnchor','rack','assemblyMove','scissorMove','scissorHeight'].includes(drag.kind))snapCandidate=bestSnapCandidate();if(snapCandidate)render();
 }
 function onUp(e){
   if(drag&&manualDrive)finishManual();
-  drag=null;
+  if(drag&&snapCandidate?.kind==='pivot'&&drag.kind==='node'){mergeCoincidentPivots(snapCandidate.sourceId,snapCandidate.targetId);sel={type:'node',id:snapCandidate.targetId}}
+  if(drag&&snapCandidate?.kind==='pin'&&['rackAnchor','rack','assemblyMove','scissorMove','scissorHeight'].includes(drag.kind)){
+    const candidate=snapCandidate,r=rack(candidate.rackId),g=scissor(candidate.scissorId);
+    if(r&&g&&dist(rackAnchor(r),node(g.driveId))<=(23/cam.scale)&&attachRackScissor(r,g)){solve(155);toast('◉ Encaixe cinemático criado! A cremalheira agora aciona a abertura do pantógrafo.');}
+  }
+  snapCandidate=null;drag=null;
   renderProperties();render();
   stage.classList.remove('dragging');
   try{stage.releasePointerCapture(e.pointerId)}catch{}
@@ -562,7 +641,7 @@ function createScissor(stages=3,width=110,height=140,replace=false){
  toast('Pantógrafo ADICIONADO ao desenho. ↕ abre; ✥ move; ⤾ gira.');
  return group;
 }
-function goPreset(name){if(name==='scissor'){createScissor(3,110,140,true);return}M=serial();sel=null;multi=[];pending=null;manualDrive=null;t=0;playing=false;updatePlay();let n=(x,y,opt={})=>addNode(x,y,opt);let b=(a,z)=>addBar(a,z);let g=(x,y,typ='gear',teeth=24,m=3.5)=>addGear(x,y,typ,teeth,m);
+function goPreset(name){if(name==='scissor'){createScissor(3,110,140,true);return}M=serial();snapCandidate=null;sel=null;multi=[];pending=null;manualDrive=null;t=0;playing=false;updatePlay();let n=(x,y,opt={})=>addNode(x,y,opt);let b=(a,z)=>addBar(a,z);let g=(x,y,typ='gear',teeth=24,m=3.5)=>addGear(x,y,typ,teeth,m);
   if(name==='four'){
     M.name='Mecanismo de quatro barras';let a=n(-160,80,{fixed:true}),q=n(-90,80),c=n(40,-71.9868),d=n(90,80,{fixed:true});b(a,q);b(q,c);b(c,d);M.bars[0].motor={rpm:7,base:0};
   }else if(name==='slider'){
@@ -577,6 +656,12 @@ function goPreset(name){if(name==='scissor'){createScissor(3,110,140,true);retur
     const bottom=addRack(-48,radius);node(bottom.node).slider.range=420;bottom.length=190;connectRack(bottom,a,1);
     const other=addRack(orthogonal?radius:-48,orthogonal?-48:-radius);
     node(other.node).slider.range=420;other.length=190;rotateRack(other,orthogonal?90:0);connectRack(other,a,-1);
+  }else if(name==='rackscissor'){
+    M.name='Pinhão + cremalheira + pantógrafo';
+    const a=g(-110,100,'gear',24),r=addRack(-110,100-a.radius-RACK_CLEARANCE);r.length=230;
+    node(r.node).slider.range=240;connectRack(r,a,-1);
+    const sg=createScissor(3,110,140,false);attachRackScissor(r,sg);
+    a.motor={rpm:1.25};
   }else if(name==='spring'){
     M.name='Abertura automática por mola';let a=n(-160,80,{fixed:true}),q=n(-90,80),c=n(40,-71.9868),d=n(90,80,{fixed:true});b(a,q);b(q,c);b(c,d);M.bars[0].motor={type:'spring',base:0,target:-rad(110),tau:.95};
   }else if(name==='eccentric'){
@@ -584,16 +669,16 @@ function goPreset(name){if(name==='scissor'){createScissor(3,110,140,true);retur
   }else M.name='Projeto sem título';
   $('projectTitle').textContent=M.name;solve(200);renderProperties();requestAnimationFrame(fit);updateTime();$('examplesModal').classList.remove('show');setTool('select');
 }
-function serialize(){return {version:4,app:'Kinetika',project:M}}
+function serialize(){return {version:5,app:'Kinetika',project:M}}
 function download(name,contents,mime){let blob=new Blob([contents],{type:mime}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),400)}
 function exportJSON(){download((M.name||'mecanismo').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-')+'.json',JSON.stringify(serialize(),null,2),'application/json');toast('Projeto exportado em JSON.')}
 function exportSVG(){const old=stage.getAttribute('viewBox'),content=`<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="${old}" width="1400" height="900">${sceneSVG()}</svg>`;download('kinetika-mecanismo.svg',content,'image/svg+xml');toast('Desenho SVG exportado.')}
 function loadJSON(input){let a=input?.project||input;if(!a||!Array.isArray(a.nodes)||!Array.isArray(a.bars)||!Array.isArray(a.gears)||!Array.isArray(a.mates)||!Array.isArray(a.racks))throw Error('Estrutura do arquivo incompatível');
   const known=new Set(a.nodes.map(n=>n.id));if(a.bars.some(b=>!known.has(b.a)||!known.has(b.b))||a.gears.some(g=>!known.has(g.node)))throw Error('Arquivo contém conexões inválidas');
-  M={...serial(),...a,nodes:a.nodes,bars:a.bars,gears:a.gears,mates:a.mates,racks:a.racks,aligns:a.aligns||[],scissors:a.scissors||[],next:Math.max(1,Number(a.next)||1)};M.next=Math.max(M.next,...[...M.nodes,...M.bars,...M.gears,...M.mates,...M.racks,...M.aligns].map(v=>Number(String(v.id).slice(1))+1||1));
+  M={...serial(),...a,nodes:a.nodes,bars:a.bars,gears:a.gears,mates:a.mates,racks:a.racks,aligns:a.aligns||[],pinLinks:a.pinLinks||[],scissors:a.scissors||[],next:Math.max(1,Number(a.next)||1)};M.next=Math.max(M.next,...[...M.nodes,...M.bars,...M.gears,...M.mates,...M.racks,...M.aligns].map(v=>Number(String(v.id).slice(1))+1||1));
   // Migração de projetos V1/V2: offset antigo era coordenada global X.
   const oldVersion=Number(input?.version||1);
-  for(const r of M.racks){r.side=r.side===-1?-1:1;const n=node(r.node);if(!n||!n.slider)continue;
+  for(const r of M.racks){r.anchorX=clamp(Number(r.anchorX)||0,-r.length/2+6,r.length/2-6);r.side=r.side===-1?-1:1;const n=node(r.node);if(!n||!n.slider)continue;
     if(oldVersion<3&&r.gearId&&gear(r.gearId)){
       const g=gear(r.gearId),c=node(g.node);n.slider.angle=0;
       const q=n.x-c.x;r.side=1;r.offset=q+g.radius*g.angle;
@@ -608,6 +693,7 @@ function loadJSON(input){let a=input?.project||input;if(!a||!Array.isArray(a.nod
       M.aligns=M.aligns.filter(c=>!(inside.has(c.a)&&inside.has(c.b)));M.scissor=null;placeScissor(g);
     }
   }
+  M.pinLinks=M.pinLinks.filter(l=>rack(l.rackId)&&scissor(l.scissorId));
   t=0;playing=false;sel=null;multi=[];pending=null;manualDrive=null;updatePlay();$('projectTitle').textContent=M.name;solve();renderProperties();fit();setTool('select');toast('Projeto importado com sucesso.');
 }
 $('palette').addEventListener('click',e=>{const b=e.target.closest('[data-tool]');if(b)setTool(b.dataset.tool)});
@@ -628,9 +714,10 @@ $('resetBtn').onclick=()=>{t=0;playing=false;updatePlay();solve(180);render();up
 $('stepBtn').onclick=()=>{playing=false;updatePlay();t+=.05;solve(120);render();updateTime()};
 $('speedControl').oninput=e=>{speed=Number(e.target.value);$('speedText').textContent=speed.toFixed(1)+'×'};
 $('zoomIn').onclick=()=>{cam.scale=clamp(cam.scale*1.2,.3,4.5);render()};$('zoomOut').onclick=()=>{cam.scale=clamp(cam.scale/1.2,.3,4.5);render()};$('fitBtn').onclick=fit;
-$('properties').addEventListener('input',e=>{const slider=e.target.closest('[data-rack-slider]');if(!slider)return;playing=false;updatePlay();manualRackPosition(rack(slider.dataset.rackSlider),Number(slider.value),true)});
+$('properties').addEventListener('input',e=>{const anchor=e.target.closest('[data-anchor-slider]');if(anchor){const r=rack(anchor.dataset.anchorSlider);if(r){setRackAnchor(r,Number(anchor.value));solve(100);render();const number=$('properties').querySelector('[data-prop="anchorX"]');if(number)number.value=String(r.anchorX)}return}
+  const slider=e.target.closest('[data-rack-slider]');if(!slider)return;playing=false;updatePlay();manualRackPosition(rack(slider.dataset.rackSlider),Number(slider.value),true)});
 $('properties').addEventListener('change',e=>{let p=e.target.closest('[data-prop]');if(p)applyProperty(p.dataset.prop,p.value,p.checked)});
-$('properties').addEventListener('click',e=>{let act=e.target.closest('[data-act]');if(!act)return;if(act.dataset.act==='fit')fit();if(act.dataset.act==='alignSelectionX')useTwoSelection('x');if(act.dataset.act==='alignSelectionY')useTwoSelection('y');if(act.dataset.act==='delete'&&sel)deleteItem(sel.type,sel.id);if(act.dataset.act==='disconnectRack'&&sel?.type==='rack'){disconnectRack(rack(sel.id));solve();renderProperties();render();toast('Cremalheira desconectada; permanece orientável.')}if(act.dataset.act==='stopMotor'){M.gears.forEach(g=>g.baseAngle=g.angle);removeMotors();playing=false;t=0;updatePlay();solve();render();renderProperties();toast('Acionamento removido.')}if(['motor','spring'].includes(act.dataset.act)&&sel){let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):gear(sel.id);if(obj&&makeMotor(sel.type,obj,act.dataset.act))renderProperties()}if(act.dataset.act==='eccentric'&&sel?.type==='gear'){let nn=addFollower(gear(sel.id));select('node',nn.id);solve()}});
+$('properties').addEventListener('click',e=>{let act=e.target.closest('[data-act]');if(!act)return;if(act.dataset.act==='fit')fit();if(['anchorStart','anchorCenter','anchorEnd'].includes(act.dataset.act)&&sel?.type==='rack'){const r=rack(sel.id);const pos=act.dataset.act==='anchorStart'?-r.length/2+6:act.dataset.act==='anchorEnd'?r.length/2-6:0;setRackAnchor(r,pos);solve(120);renderProperties();render();}if(act.dataset.act==='unlinkPin'){const l=sel?.type==='rack'?rackLink(sel.id):sel?.type==='scissor'?scissorLink(sel.id):null;if(l){detachPinLink(l.id);solve(100);renderProperties();render();}}if(act.dataset.act==='alignSelectionX')useTwoSelection('x');if(act.dataset.act==='alignSelectionY')useTwoSelection('y');if(act.dataset.act==='delete'&&sel)deleteItem(sel.type,sel.id);if(act.dataset.act==='disconnectRack'&&sel?.type==='rack'){disconnectRack(rack(sel.id));solve();renderProperties();render();toast('Cremalheira desconectada; permanece orientável.')}if(act.dataset.act==='stopMotor'){M.gears.forEach(g=>g.baseAngle=g.angle);removeMotors();playing=false;t=0;updatePlay();solve();render();renderProperties();toast('Acionamento removido.')}if(['motor','spring'].includes(act.dataset.act)&&sel){let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):gear(sel.id);if(obj&&makeMotor(sel.type,obj,act.dataset.act))renderProperties()}if(act.dataset.act==='eccentric'&&sel?.type==='gear'){let nn=addFollower(gear(sel.id));select('node',nn.id);solve()}});
 window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel)deleteItem(sel.type,sel.id)}const keys={v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
 let previous=0;function tick(ms){if(!previous)previous=ms;const dt=clamp((ms-previous)/1000,0,.05);previous=ms;if(playing){t+=dt*speed;solve();render();updateTime()}requestAnimationFrame(tick)}
 new ResizeObserver(()=>render()).observe(stage);goPreset('rackdual');select('rack',M.racks[1].id);requestAnimationFrame(tick);
