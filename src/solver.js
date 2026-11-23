@@ -89,7 +89,7 @@ export function solveConstraints(M, options={}) {
    const rows=compile(x),max=Math.max(0,...rows.filter(r=>!r.goal).map(r=>Math.abs(r.r)));
    const goalError=Math.max(0,...rows.filter(r=>r.goal).map(r=>Math.abs(r.r)));
    if(isGoal&&max<(options.tolerance??.015)&&goalError<goalWeight*(options.goalTolerance??.12)){converged=true;error=max;break}
-   if(max<(options.tolerance??.015)){converged=true;error=max;break}
+   if(!isGoal&&max<(options.tolerance??.015)){converged=true;error=max;break}
    if(!nfree){status='pinned';error=max;break}
    const lambda=options.damping??(isGoal?1e-7:.002),grad=new Float64Array(nfree),diag=new Float64Array(nfree).fill(lambda);
    for(const row of rows){for(const [j,v] of row.g){grad[j]-=v*row.r;diag[j]+=v*v}}
