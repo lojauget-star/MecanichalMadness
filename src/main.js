@@ -6,7 +6,8 @@ import {solveConstraints} from './solver.js';
 import {analyzeGeometry} from './geometry.js';
 import {isDraftBar,isConnectedScissor,countScissorContacts,validateNodeJoint,translateScissorToVertex} from './links.js';
 import {planMotionSweep,capturePose,summarizeMotionSweep,sampleSeverity} from './sweep.js';
-// KINÉTIKA V12 | Juntas em todos os vértices, orientação preservada e cotas de barras traváveis.
+import {suggestLocalPlan,modelSummary,appendCrossRacks,normalizeAdvisorPlan} from './design-assistant.js';
+// KINÉTIKA V13 | Juntas em todos os vértices, orientação preservada e cotas de barras traváveis.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
 const TAU=Math.PI*2, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, RACK_CLEARANCE=9;
@@ -49,7 +50,7 @@ function scissorCenter(g){const {u,v}=localAxes(g.angle),w=scissorWidth(g);retur
 function scissorRotateHandle(g){const mid=scissorCenter(g),{v}=localAxes(g.angle);return {x:mid.x-v.x*(Math.max(55,g.height*.5+38)),y:mid.y-v.y*(Math.max(55,g.height*.5+38))}}
 function scissorMoveHandle(g){return scissorCenter(g)}
 function entityNodeIds(o){if(!o)return [];
- if(o.type==='node')return [o.id];
+ if(o.type==='node'||o.type==='guide')return [o.id];
  if(o.type==='gear')return [gear(o.id)?.node].filter(Boolean);
  if(o.type==='rack')return [rack(o.id)?.node].filter(Boolean);
  if(o.type==='bar'){const b=bar(o.id);return b?[b.a,b.b]:[]}
@@ -57,6 +58,7 @@ function entityNodeIds(o){if(!o)return [];
 }
 function entityPosition(o){if(!o)return null;const g=groupForTarget(o);if(g&&o.type==='scissor')return scissorCenter(g);
  if(o.type==='bar'){const b=bar(o.id);if(!b)return null;const a=node(b.a),z=node(b.b);return {x:(a.x+z.x)/2,y:(a.y+z.y)/2}}
+ if(o.type==='guide'){const s=node(o.id)?.slider;return s?{x:s.ox,y:s.oy}:null;}
  const n=node(entityNodeIds(o)[0]);return n?{x:n.x,y:n.y}:null;
 }
 function connectedNodeIds(o){const seen=new Set(entityNodeIds(o)),todo=[...seen];
@@ -217,7 +219,43 @@ function connectJointPorts(a,b){
  }
  toast('◉ Vértices conectados. A orientação e as medidas rígidas foram preservadas.');return true;
 }
-function removePointLink(id){M.pointLinks=(M.pointLinks||[]).filter(l=>l.id!==id);M.nodeLinks=(M.nodeLinks||[]).filter(l=>l.id!==id);solve(140);render();renderProperties();toast('Junta removida. As peças ficaram independentes.')}
+function jointsForNode(id){
+ return [...(M.pointLinks||[]).filter(l=>l.nodeId===id).map(l=>({...l,kind:'rack-node'})),
+ ...(M.nodeLinks||[]).filter(l=>l.a===id||l.b===id).map(l=>({...l,kind:'node-node'})),
+ ...(M.pinLinks||[]).filter(l=>scissor(l.scissorId)?.driveId===id).map(l=>({...l,kind:'legacy-pin'}))];
+}
+function jointsForScissor(g){
+ const ids=new Set([...g.topIds,...g.bottomIds,...g.centerIds]);
+ return [...(M.pointLinks||[]).filter(l=>ids.has(l.nodeId)).map(l=>({...l,kind:'rack-node'})),
+ ...(M.nodeLinks||[]).filter(l=>ids.has(l.a)||ids.has(l.b)).map(l=>({...l,kind:'node-node'})),
+ ...(M.pinLinks||[]).filter(l=>l.scissorId===g.id).map(l=>({...l,kind:'legacy-pin'}))];
+}
+function jointDescription(l){
+ if(l.kind==='legacy-pin')return `Cremalheira ${l.rackId.toUpperCase()} ↔ pantógrafo ${l.scissorId.toUpperCase()}`;
+ if(l.kind==='rack-node')return `${l.nodeId.toUpperCase()} ↔ ${l.rackId.toUpperCase()} (${l.slot==='custom'?'âncora':l.slot})`;
+ return `${l.a.toUpperCase()} ↔ ${l.b.toUpperCase()}`;
+}
+function renderJointControls(links){return links.length?`<div class="prop-group"><div class="prop-title">Conexões individuais · ${links.length}</div><div class="tips">Desconecte sem apagar o pantógrafo ou as demais ferramentas.</div>${links.map(l=>`<div class="joint-entry"><span>◉ ${str(jointDescription(l))}</span><button class="btn mini" data-act="detachJoint" data-link-id="${str(l.id)}" title="Soltar apenas esta junta">Desunir</button></div>`).join('')}</div>`:''}
+function detachJoint(id){
+ const old=jointCount();M.pointLinks=(M.pointLinks||[]).filter(l=>l.id!==id);
+ M.nodeLinks=(M.nodeLinks||[]).filter(l=>l.id!==id);
+ M.pinLinks=(M.pinLinks||[]).filter(l=>l.id!==id);
+ if(jointCount()===old)return false;
+ stablePose=null;solve(140);render();renderProperties();toast('Junta desacoplada. As peças foram preservadas.');return true;
+}
+function removePointLink(id){return detachJoint(id)}
+function jointsForPort(p){
+ if(!p)return [];
+ if(p.kind==='node')return jointsForNode(p.nodeId);
+ return [...(M.pointLinks||[]).filter(l=>l.rackId===p.rackId&&l.slot===p.slot).map(l=>({...l,kind:'rack-node'})),
+ ...(M.pinLinks||[]).filter(l=>l.rackId===p.rackId&&(l.slot||'custom')===p.slot).map(l=>({...l,kind:'legacy-pin'}))];
+}
+function disconnectNear(p){
+ const ports=getJointPorts();let best=null,d=24/cam.scale;
+ for(const port of ports){const at=portPoint(port);if(!at)continue;const links=jointsForPort(port);if(!links.length)continue;const dd=dist(at,p);if(dd<d){d=dd;best={port,links}}}
+ if(!best){toast('Toque em um vértice com junta. Ou selecione o pantógrafo e desuna pelo inspetor.',true);return false;}
+ return detachJoint(best.links[best.links.length-1].id);
+}
 function jointCount(){return (M.pinLinks?.length||0)+(M.pointLinks?.length||0)+(M.nodeLinks?.length||0)}
 function bestSnapCandidate(maxRadius=20/cam.scale){let best=null,bestD=maxRadius;
  for(const r of M.racks)for(const g of M.scissors||[]){
@@ -334,8 +372,8 @@ function makeMotor(kind,obj,mode='motor'){
   }else return false;
   t=0;playing=false;updatePlay();solve();toast(mode==='spring'?'Abertura idealizada por mola configurada.':'Motor instalado. Ajuste a velocidade nas propriedades.');return true;
 }
-function setTool(next){pendingPort=null;hoverPort=null;inverseDragInfo=null;inverseGhost=null;if(['alignX','alignY'].includes(next)&&multi.length===2){useTwoSelection(next==='alignX'?'x':'y');next='select'}tool=next;pending=null;document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===next));$('modeBadge').innerHTML='FERRAMENTA <span>'+({select:'TESTAR',move:'MOVER CONJUNTO',rotate:'ROTACIONAR',joint:'UNIR PONTOS',node:'PIVÔ LIVRE',fixed:'APOIO FIXO',bar:'BARRA',slider:'GUIA LINEAR',gear:'ENGRENAGEM',pulley:'POLIA',rack:'CREMALHEIRA',mesh:'ENGRENAR',belt:'CORREIA',rackmesh:'PINHÃO + CREMALHEIRA',eccentric:'PINO EXCÊNTRICO',motor:'MOTOR',spring:'MOLA IDEALIZADA',alignX:'ALINHAR X',alignY:'ALINHAR Y',delete:'EXCLUIR'}[next]||next.toUpperCase())+'</span>';
-  const texts={joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>V9 · Arraste inverso:</strong> puxe um pivô, a extremidade de uma barra, cremalheira, pinhão ou ponto de acionamento do pantógrafo. O sistema busca a posição válida mais próxima sem deformar as barras. Para reposicionar conjuntos, use G.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
+function setTool(next){pendingPort=null;hoverPort=null;inverseDragInfo=null;inverseGhost=null;if(['alignX','alignY'].includes(next)&&multi.length===2){useTwoSelection(next==='alignX'?'x':'y');next='select'}tool=next;pending=null;document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===next));$('modeBadge').innerHTML='FERRAMENTA <span>'+({select:'TESTAR',move:'MOVER CONJUNTO',rotate:'ROTACIONAR',joint:'UNIR PONTOS',node:'PIVÔ LIVRE',fixed:'APOIO FIXO',bar:'BARRA',slider:'GUIA LINEAR',gear:'ENGRENAGEM',pulley:'POLIA',rack:'CREMALHEIRA',mesh:'ENGRENAR',belt:'CORREIA',rackmesh:'PINHÃO + CREMALHEIRA',eccentric:'PINO EXCÊNTRICO',motor:'MOTOR',spring:'MOLA IDEALIZADA',alignX:'ALINHAR X',alignY:'ALINHAR Y',unlink:'DESUNIR JUNTA',delete:'EXCLUIR'}[next]||next.toUpperCase())+'</span>';
+  const texts={unlink:'<strong>Desunir (U):</strong> toque em um ponto com conexão para soltar somente uma junta. Para escolher entre várias conexões, selecione o pantógrafo no inspetor.',joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>V9 · Arraste inverso:</strong> puxe um pivô, a extremidade de uma barra, cremalheira, pinhão ou ponto de acionamento do pantógrafo. O sistema busca a posição válida mais próxima sem deformar as barras. Para reposicionar conjuntos, use G.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
 function sizeView(){const w=Math.max(stage.clientWidth,100),h=Math.max(stage.clientHeight,100);view={w:w/cam.scale,h:h/cam.scale,x:cam.x-w/(2*cam.scale),y:cam.y-h/(2*cam.scale)};stage.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);return view}
 function ptOf(e){const r=stage.getBoundingClientRect();return {x:view.x+((e.clientX-r.left)/r.width)*view.w,y:view.y+((e.clientY-r.top)/r.height)*view.h}}
 function hitNode(p){let best=null,bestD=18/cam.scale;for(const n of M.nodes){let d=dist(p,n);if(d<bestD){best=n;bestD=d}}return best}
@@ -455,7 +493,8 @@ function sceneSVG(){
   s+=`<line x1="${v.x}" x2="${v.x+v.w}" y1="0" y2="0" stroke="#4e6870" stroke-opacity=".25"/><line y1="${v.y}" y2="${v.y+v.h}" x1="0" x2="0" stroke="#4e6870" stroke-opacity=".25"/>`;
   for(const c of M.aligns){const a=node(c.a),b=node(c.b);if(!a||!b)continue;s+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#7aa4ac" stroke-width="1.5" stroke-dasharray="3 6" opacity=".6"/>`}
   for(const n of M.nodes)if(n.slider){const q=n.slider,dx=Math.cos(rad(q.angle))*q.range/2,dy=Math.sin(rad(q.angle))*q.range/2;
-    s+=`<line x1="${q.ox-dx}" y1="${q.oy-dy}" x2="${q.ox+dx}" y2="${q.oy+dy}" stroke="#506f79" stroke-width="12" stroke-linecap="round" opacity=".25"/><line x1="${q.ox-dx}" y1="${q.oy-dy}" x2="${q.ox+dx}" y2="${q.oy+dy}" stroke="#8cb9c0" stroke-width="1.8" stroke-dasharray="7 5" opacity=".8"/>`;
+    s+=`<line data-kind="guide" data-id="${n.id}" x1="${q.ox-dx}" y1="${q.oy-dy}" x2="${q.ox+dx}" y2="${q.oy+dy}" stroke="#506f79" stroke-width="12" stroke-linecap="round" opacity=".25"/><line x1="${q.ox-dx}" y1="${q.oy-dy}" x2="${q.ox+dx}" y2="${q.oy+dy}" stroke="#8cb9c0" stroke-width="1.8" stroke-dasharray="7 5" opacity=".8"/>`;
+    s+=`<line data-kind="guide" data-id="${n.id}" x1="${q.ox-dx}" y1="${q.oy-dy}" x2="${q.ox+dx}" y2="${q.oy+dy}" stroke="transparent" stroke-width="${Math.max(18,22/cam.scale)}" pointer-events="stroke"/>`;
     for(const mult of [-1,1])s+=`<line x1="${q.ox+dx*mult-5*Math.sin(rad(q.angle))}" y1="${q.oy+dy*mult+5*Math.cos(rad(q.angle))}" x2="${q.ox+dx*mult+5*Math.sin(rad(q.angle))}" y2="${q.oy+dy*mult-5*Math.cos(rad(q.angle))}" stroke="#97b7c0" stroke-width="2"/>`;
   }
   for(const m of M.mates){const a=gear(m.a),b=gear(m.b);if(!a||!b)continue;const na=node(a.node),nb=node(b.node);if(m.type==='belt'){
@@ -484,7 +523,7 @@ function sceneSVG(){
     if(n.slider){s+=`<rect x="${n.x-12}" y="${n.y-10}" width="24" height="20" rx="4" fill="#223f4c" stroke="${hi?'#b3ffe0':'#9fc6cd'}" stroke-width="2" transform="rotate(${n.slider.angle} ${n.x} ${n.y})"/>`}
     let col=n.follower?'#f6c17f':n.fixed?'#becbd0':'#74dfbd';s+=`<circle data-kind="node" data-id="${n.id}" cx="${n.x}" cy="${n.y}" r="${hi?8.5:6.5}" fill="#152831" stroke="${hi?'#ffffff':col}" stroke-width="${hi?3.7:2.7}"/><circle data-kind="node" data-id="${n.id}" cx="${n.x}" cy="${n.y}" r="${11/cam.scale+4}" fill="transparent"/>`;
   }
-  if(tool==='joint')for(const gg of M.scissors||[]){
+  if(tool==='joint'||tool==='unlink')for(const gg of M.scissors||[]){
     for(const id of [...gg.topIds,...gg.bottomIds,...gg.centerIds]){const p=node(id);if(!p)continue;
       s+=`<circle data-port-kind="node" data-port-id="${id}" cx="${p.x}" cy="${p.y}" r="${Math.max(10,14/cam.scale)}" fill="#255d55" fill-opacity=".65" stroke="#a5ffe0" stroke-width="2.5"/>`;
     }
@@ -516,7 +555,7 @@ function sceneSVG(){
     const offset=offsetForRackPort(r,slot),a=rackAnchorAt(r,offset);
     if(slot!=='custom'&&Math.abs(offset-(r.anchorX||0))<2)continue;
     const isUsed=(M.pointLinks||[]).some(l=>l.rackId===r.id&&l.slot===slot)||(M.pinLinks||[]).some(l=>l.rackId===r.id&&(l.slot||'custom')===slot);
-    const show=tool==='joint'||sel?.type==='rack'&&sel.id===r.id||isUsed;
+    const show=tool==='joint'||tool==='unlink'||sel?.type==='rack'&&sel.id===r.id||isUsed;
     if(show)s+=`<circle data-port-kind="rack" data-port-id="${r.id}" data-port-slot="${slot}" cx="${a.x}" cy="${a.y}" r="${Math.max(5,7/cam.scale)}" fill="${isUsed?'#4dd8b7':'#25383f'}" stroke="${isUsed?'#ddfff4':'#edc68b'}" stroke-width="2.2"/>`;
   }}
   for(const l of M.nodeLinks||[]){const a=node(l.a),b=node(l.b);if(!a||!b)continue;s+=`<circle cx="${(a.x+b.x)/2}" cy="${(a.y+b.y)/2}" r="${13/cam.scale}" fill="none" stroke="#77f0ce" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none"/>`;}
@@ -524,7 +563,7 @@ function sceneSVG(){
     const p=rackAnchorAt(r,offsetForRackPort(r,l.slot,l.offset));
     s+=`<circle cx="${p.x}" cy="${p.y}" r="${14/cam.scale}" fill="none" stroke="#70e5ce" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none"/>`;
   }
-  if(tool==='joint')for(const port of getJointPorts()){
+  if(tool==='joint'||tool==='unlink')for(const port of getJointPorts()){
     if(port.kind!=='node')continue;const p=portPoint(port);if(!p)continue;
     const isHover=hoverPort&&portId(hoverPort)===portId(port);
     s+=`<circle data-port-kind="node" data-port-id="${port.nodeId}" cx="${p.x}" cy="${p.y}" r="${Math.max(5,(isHover?12:8)/cam.scale)}" fill="#12252d" fill-opacity=".92" stroke="${isHover?'#adffdd':'#78c8c8'}" stroke-width="2"/>`;
@@ -562,14 +601,19 @@ function checkRow(label,id,value){return `<label class="field"><span>${label}</s
 function toolButtons(deleteAllowed=true){return `<div class="prop-btns">${deleteAllowed?'<button class="btn warn mini" data-act="delete">✕ Excluir</button>':''}<button class="btn mini" data-act="fit">⊡ Enquadrar</button></div>`}
 function renderProperties(){const p=$('properties'),h=$('inspectorTitle'),sub=$('inspectorSubtitle');if(multi.length===2){h.textContent='Alinhar dois objetos';sub.textContent='A primeira seleção é a referência; o segundo objeto será reposicionado, preservando seu conjunto conectado.';p.innerHTML='<div class="multi-objects">1º: '+multi[0].type+' '+multi[0].id+'<br>2º: '+multi[1].type+' '+multi[1].id+'<div class="prop-btns"><button class="btn mini primary" data-act="alignSelectionX">║ Alinhar X</button><button class="btn mini primary" data-act="alignSelectionY">═ Alinhar Y</button></div></div>';return}if(!sel){h.textContent='Propriedades';sub.textContent='Selecione um componente para modificar seus parâmetros.';p.innerHTML='<div class="placeholder">Clique em um pivô, barra, roda ou cremalheira para editar suas propriedades.<br><br>Para criar uma barra, clique em dois pontos.</div>';return}
   let html='',item=null;
-  if(sel.type==='node'){item=node(sel.id);if(!item){select(null);return}h.textContent='Pivô '+item.id.toUpperCase();sub.textContent=item.follower?'Pino excêntrico ligado a uma roda':item.fixed?'Apoio fixo ao solo':item.slider?'Cursor sobre guia linear':'Articulação móvel no plano';html='<div class="prop-group"><div class="prop-title">Posição (mm)</div>'+optRow('Coordenada X','x',fmtRaw(item.x))+optRow('Coordenada Y','y',fmtRaw(item.y))+checkRow('Preso ao solo','fixed',item.fixed)+'</div>';if(item.slider){html+='<div class="prop-group"><div class="prop-title">Guia de translação</div>'+optRow('Inclinação (°)','sliderAngle',item.slider.angle)+optRow('Curso total (mm)','sliderRange',item.slider.range,1,'number','20')+'</div>';}if(item.follower){html+='<div class="prop-group"><div class="prop-title">Excêntrico</div>'+optRow('Raio local X (mm)','followX',item.follower.rx)+optRow('Raio local Y (mm)','followY',item.follower.ry)+'</div>';}if(item.motor){html+=item.motor.type==='spring'?'<div class="prop-group"><div class="prop-title">Mola linear idealizada</div>'+optRow('Curso alvo (mm)','targetOffset',item.motor.targetOffset)+optRow('Tempo característico (s)','tau',item.motor.tau,.05,'number','.05')+'</div>':'<div class="prop-group"><div class="prop-title">Motor linear oscilante</div>'+optRow('Ciclos/min','rpm',item.motor.rpm,.5)+optRow('Amplitude (mm)','amplitude',item.motor.amplitude)+'</div>'}else if(item.slider&&!item.follower)html+='<div class="prop-btns"><button class="btn mini" data-act="motor">↻ Motor linear</button><button class="btn mini" data-act="spring">⌁ Mola</button></div>';
+  if(sel.type==='guide'){item=node(sel.id);if(!item?.slider){select(null);return;}const g=item.slider;
+    h.textContent='Guia linear '+item.id.toUpperCase();sub.textContent='Trilho reposicionável com cursor prismático; arraste a linha para mover o conjunto.';
+    html='<div class="prop-group"><div class="prop-title">Posição da guia · mm</div>'+optRow('Origem X','guideX',fmtRaw(g.ox))+optRow('Origem Y','guideY',fmtRaw(g.oy))+optRow('Rotação (°)','guideAngle',fmtRaw(g.angle))+optRow('Curso total (mm)','guideRange',fmtRaw(g.range),10,'number','20')+'</div><div class="tips">Arraste a linha tracejada para reposicionar o trilho junto com os componentes conectados. Modo R: rotacione em torno da origem.</div><div class="prop-btns"><button class="btn mini" data-act="moveGuide">✥ Mover guia</button><button class="btn mini" data-act="rotateGuide">⤾ Girar guia</button></div>';
+    html+=renderJointControls(jointsForNode(item.id));
+  }else if(sel.type==='node'){item=node(sel.id);if(!item){select(null);return}h.textContent='Pivô '+item.id.toUpperCase();sub.textContent=item.follower?'Pino excêntrico ligado a uma roda':item.fixed?'Apoio fixo ao solo':item.slider?'Cursor sobre guia linear':'Articulação móvel no plano';html='<div class="prop-group"><div class="prop-title">Posição (mm)</div>'+optRow('Coordenada X','x',fmtRaw(item.x))+optRow('Coordenada Y','y',fmtRaw(item.y))+checkRow('Preso ao solo','fixed',item.fixed)+'</div>';if(item.slider){html+='<div class="prop-group"><div class="prop-title">Guia de translação</div>'+optRow('Inclinação (°)','sliderAngle',item.slider.angle)+optRow('Curso total (mm)','sliderRange',item.slider.range,1,'number','20')+'</div>';}if(item.follower){html+='<div class="prop-group"><div class="prop-title">Excêntrico</div>'+optRow('Raio local X (mm)','followX',item.follower.rx)+optRow('Raio local Y (mm)','followY',item.follower.ry)+'</div>';}if(item.motor){html+=item.motor.type==='spring'?'<div class="prop-group"><div class="prop-title">Mola linear idealizada</div>'+optRow('Curso alvo (mm)','targetOffset',item.motor.targetOffset)+optRow('Tempo característico (s)','tau',item.motor.tau,.05,'number','.05')+'</div>':'<div class="prop-group"><div class="prop-title">Motor linear oscilante</div>'+optRow('Ciclos/min','rpm',item.motor.rpm,.5)+optRow('Amplitude (mm)','amplitude',item.motor.amplitude)+'</div>'}else if(item.slider&&!item.follower)html+='<div class="prop-btns"><button class="btn mini" data-act="motor">↻ Motor linear</button><button class="btn mini" data-act="spring">⌁ Mola</button></div>';
   }else if(sel.type==='bar'){item=bar(sel.id);if(!item){select(null);return}h.textContent='Barra '+item.id.toUpperCase();sub.textContent=isDraftBar(item)?'Barra em dimensionamento, com comprimento editável.':'Barra rígida: comprimento travado durante movimentos e animações.';html='<div class="prop-group"><div class="prop-title">Estado da dimensão</div><div class="tips">'+(isDraftBar(item)?'✎ Rascunho: o comprimento pode variar enquanto você encontra a medida.':'🔒 Travada: o comprimento não pode variar por acionamento, ligação ou solução numérica.')+'</div><div class="prop-btns"><button class="btn mini primary" data-act="'+(isDraftBar(item)?'lockBar':'draftBar')+'">'+(isDraftBar(item)?'🔒 Fixar dimensão atual':'✎ Liberar para dimensionar')+'</button></div></div><div class="prop-group"><div class="prop-title">Geometria</div>'+(isDraftBar(item)?optRow('Comprimento (mm)','length',fmtRaw(item.length)):optRow('Comprimento travado (mm)','length',fmtRaw(item.length)).replace('data-prop="length"','data-prop="length" disabled aria-disabled="true"'))+optRow('Orientação (°)','barAngle',fmtRaw(deg(Math.atan2(node(item.b).y-node(item.a).y,node(item.b).x-node(item.a).x))))+'<div class="tips">'+(isDraftBar(item)?'Ajuste esta dimensão no rascunho; fixe quando definir a medida final.':'Para alterar a cota, primeiro escolha Liberar para dimensionar.')+'</div></div>';if(item.motor)html+=item.motor.type==='spring'?'<div class="prop-group"><div class="prop-title">Mola angular idealizada</div>'+optRow('Ângulo final (°)','targetAngle',deg(item.motor.target),1)+optRow('Tempo característico (s)','tau',item.motor.tau,.05,'number','.05')+'</div>':'<div class="prop-group"><div class="prop-title">Motor angular</div>'+optRow('Rotação (rpm)','rpm',item.motor.rpm,.5)+optRow('Fase inicial (°)','baseAngle',deg(item.motor.base),1)+'</div>';else html+='<div class="prop-btns"><button class="btn mini" data-act="motor">↻ Aplicar motor</button><button class="btn mini" data-act="spring">⌁ Mola</button></div>';}
   else if(sel.type==='gear'){item=gear(sel.id);if(!item){select(null);return}h.textContent=(item.type==='gear'?'Engrenagem ':'Polia ')+item.id.toUpperCase();sub.textContent=item.type==='gear'?'Transmissão angular por número de dentes.':'Transmissão angular idealizada por correia sem escorregamento.';html='<div class="prop-group"><div class="prop-title">Posição e movimento</div>'+optRow('Centro X','gearX',fmtRaw(node(item.node).x))+optRow('Centro Y','gearY',fmtRaw(node(item.node).y))+optRow('Ângulo (°)','gearAngle',fmtRaw(deg(item.angle)))+'</div><div class="prop-group"><div class="prop-title">Dimensões</div>'+optRow('Dentes / referência','teeth',item.teeth,1,'number','8')+optRow('Módulo / passo (mm)','module',item.module,.1,'number','.5')+`<div class="tips">Raio primitivo: ${fmt(item.radius,2)} mm · diâmetro: ${fmt(2*item.radius,1)} mm</div></div>`;if(item.motor)html+=item.motor.type==='spring'?'<div class="prop-group"><div class="prop-title">Mola angular idealizada</div>'+optRow('Ângulo final (°)','targetAngle',deg(item.motor.target),1)+optRow('Tempo característico (s)','tau',item.motor.tau,.05,'number','.05')+'</div>':'<div class="prop-group"><div class="prop-title">Motor rotativo</div>'+optRow('Velocidade (rpm)','rpm',item.motor.rpm,.5)+'</div>';else html+='<div class="prop-btns"><button class="btn mini" data-act="motor">↻ Aplicar motor</button><button class="btn mini" data-act="spring">⌁ Mola</button><button class="btn mini" data-act="eccentric">◉ Pino excêntrico</button></div>';}
   else if(sel.type==='scissor'){
     item=scissor(sel.id);if(!item){select(null);return}
     h.textContent='Pantógrafo '+item.id.toUpperCase();sub.textContent='Módulo integrado ao projeto. Arraste ✥ para mover, ⤾ para girar e ↕ para variar a abertura.';
     html='<div class="prop-group"><div class="prop-title">Posição e geometria</div>'+optRow('Origem X (mm)','scX',fmtRaw(item.x))+optRow('Origem Y (mm)','scY',fmtRaw(item.y))+optRow('Rotação (°)','scAngle',fmtRaw(item.angle))+optRow('Altura do X (mm)','scHeight',fmtRaw(item.height))+`<div class="tips">${item.stages} estágios · diagonal ${fmt(item.diagonal,1)} mm · largura atual por X ${fmt(scissorWidth(item),1)} mm</div></div>`;
-    const connections=(M.pointLinks||[]).filter(l=>scissorForNode(l.nodeId)?.id===item.id).length+(M.nodeLinks||[]).filter(l=>scissorForNode(l.a)?.id===item.id||scissorForNode(l.b)?.id===item.id).length;html+=`<div class="prop-group"><div class="prop-title">Pontos de articulação</div><div class="tips">${2*(item.stages+1)+item.stages} vértices disponíveis · ${connections} junta(s) universal(is). Em Unir pontos (J), escolha qualquer extremidade ou cruzamento. A rotação original é preservada.</div></div>`;
+    const allJoints=jointsForScissor(item);const connections=allJoints.length;html+=`<div class="prop-group"><div class="prop-title">Pontos de articulação</div><div class="tips">${2*(item.stages+1)+item.stages} vértices disponíveis · ${connections} junta(s) universal(is). Em Unir pontos (J), escolha qualquer extremidade ou cruzamento. A rotação original é preservada.</div></div>`;
+    html+=renderJointControls(allJoints);
     const link=scissorLink(item.id);if(link)html+=`<div class="prop-group"><div class="prop-title">Articulação ativa</div><div class="tips">Acoplado à cremalheira ${str(link.rackId.toUpperCase())}. Arraste ↕ para movimentar o pinhão. O apoio inicial fica ancorado.</div><div class="prop-btns"><button class="btn mini" data-act="unlinkPin">Desfazer união</button></div></div>`;
   }
   else if(sel.type==='rack'){item=rack(sel.id);if(!item){select(null);return}
@@ -586,12 +630,14 @@ function renderProperties(){const p=$('properties'),h=$('inspectorTitle'),sub=$(
   }
   if(item?.motor)html+='<div class="prop-btns"><button class="btn mini warn" data-act="stopMotor">⏹ Remover acionamento</button></div>';
   const joins=(M.pointLinks||[]).filter(l=>sel.type==='node'?l.nodeId===sel.id:sel.type==='rack'?l.rackId===sel.id:false);
-  if(joins.length)html+=`<div class="prop-group"><div class="prop-title">Juntas / portas de conexão</div>${joins.map(l=>`<div class="tips">◉ ${str(l.id.toUpperCase())} · ${str(portName({kind:'rack',rackId:l.rackId,slot:l.slot,offset:l.offset}))} ↔ ${str(portName({kind:'node',nodeId:l.nodeId}))}</div><button class="btn mini" data-act="detachPoint" data-link-id="${str(l.id)}">Desconectar junta</button>`).join('')}</div>`;
+  if(sel.type==='node')html+=renderJointControls(jointsForNode(sel.id));
+  if(sel.type==='rack')html+=renderJointControls((M.pointLinks||[]).filter(l=>l.rackId===sel.id).map(l=>({...l,kind:'rack-node'})));
   html+=`<hr style="border:0;border-top:1px solid #2d414b;margin:19px 0">`+toolButtons();p.innerHTML=html;
 }
 const fmtRaw=n=>String(Math.round(n*100)/100);
-function applyProperty(field,value,checked){if(!sel)return;let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):sel.type==='gear'?gear(sel.id):sel.type==='scissor'?scissor(sel.id):rack(sel.id);if(!obj)return;let val=Number(value);if(!Number.isFinite(val)&&field!=='fixed')return;
-  if(field==='fixed'&&sel.type==='node'){obj.fixed=checked;if(checked){obj.slider=null;obj.motor=null} }
+function applyProperty(field,value,checked){if(!sel)return;let obj=(sel.type==='node'||sel.type==='guide')?node(sel.id):sel.type==='bar'?bar(sel.id):sel.type==='gear'?gear(sel.id):sel.type==='scissor'?scissor(sel.id):rack(sel.id);if(!obj)return;let val=Number(value);if(!Number.isFinite(val)&&field!=='fixed')return;
+  if(sel.type==='guide'){const n=obj,s=n.slider;if(!s)return;const dx=field==='guideX'?val-s.ox:0,dy=field==='guideY'?val-s.oy:0;if(field==='guideX'||field==='guideY')translateAssembly({type:'guide',id:n.id},dx,dy);if(field==='guideRange')s.range=Math.max(20,val);if(field==='guideAngle'){const q=(n.x-s.ox)*Math.cos(rad(s.angle))+(n.y-s.oy)*Math.sin(rad(s.angle));const r=M.racks.find(r=>r.node===n.id);if(r)rotateRack(r,val);else{s.angle=normDeg(val);n.x=s.ox+q*Math.cos(rad(s.angle));n.y=s.oy+q*Math.sin(rad(s.angle));}}}
+  else if(field==='fixed'&&sel.type==='node'){obj.fixed=checked;if(checked){obj.slider=null;obj.motor=null} }
   else if(sel.type==='node'){
     if(field==='x'||field==='y'){obj[field]=val;if(obj.slider){obj.slider.ox=obj.x;obj.slider.oy=obj.y}}
     if(field==='sliderAngle'&&obj.slider)obj.slider.angle=val;
@@ -620,7 +666,7 @@ function applyProperty(field,value,checked){if(!sel)return;let obj=sel.type==='n
     if(['teeth','module'].includes(field)){obj.radius=obj.teeth*obj.module/2;for(let m of M.mates){const a=gear(m.a),b=gear(m.b);m.phase=b.angle-(m.type==='gear'?-1:1)*(a.radius/b.radius)*a.angle}for(let r of M.racks)if(r.gearId===obj.id){const q=rackQ(r);r.offset=q+(r.side||1)*obj.radius*obj.angle;placeRack(r)}}
   }else if(sel.type==='scissor'){const l=scissorLink(obj.id);if(l&&['scX','scY','scAngle','scHeight'].includes(field)){toast('A junta está conectada. Arraste o ponto ↕ para acionar ou desfaça a união para editar a geometria.',true);renderProperties();return}if(field==='scX')obj.x=val;if(field==='scY')obj.y=val;if(field==='scAngle')obj.angle=normDeg(val);if(field==='scHeight')obj.height=clamp(val,Math.min(25,obj.diagonal*.22),obj.diagonal*.98);placeScissor(obj);
   }else if(sel.type==='rack'){if(field==='rackX'||field==='rackY'){const n=node(obj.node);translateAssembly(sel,field==='rackX'?val-n.x:0,field==='rackY'?val-n.y:0)}if(field==='length')obj.length=Math.max(40,val);if(field==='rackRange')node(obj.node).slider.range=Math.max(50,val);if(field==='rackAngle')rotateRack(obj,val);if(field==='rackSide')flipRackSide(obj,val>=0?1:-1);if(field==='anchorX')setRackAnchor(obj,val)}
-  solve();render();if(['module','teeth','sliderAngle','length','fixed','rackRange','rackAngle','rackSide','barAngle','gearX','gearY','gearAngle','rackX','rackY','scX','scY','scAngle','scHeight'].includes(field))renderProperties();
+  solve();render();if(['guideX','guideY','guideAngle','guideRange','module','teeth','sliderAngle','length','fixed','rackRange','rackAngle','rackSide','barAngle','gearX','gearY','gearAngle','rackX','rackY','scX','scY','scAngle','scHeight'].includes(field))renderProperties();
 }
 function deleteItem(type,id){
  const group=groupForTarget({type,id});
@@ -641,6 +687,7 @@ function fit(){if(M.nodes.length===0){cam={x:0,y:0,scale:1.5};render();return}le
 function toast(msg,bad=false){const el=$('toast');el.textContent=msg;el.classList.add('show');el.classList.toggle('bad',bad);clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3600)}
 function findForTool(p,target){if(['bar','node','fixed','slider','alignX','alignY'].includes(tool))return hitNode(p);return null}
 function processClick(p){
+  if(tool==='unlink'){disconnectNear(p);return;}
   if(tool==='joint'){
     const selected=closestPort(p,23/cam.scale,pendingPort);if(!selected){toast('Toque sobre um ponto de conexão destacado.',true);return}
     if(!pendingPort){pendingPort=selected;toast('Primeiro ponto: '+portName(selected)+'. Agora escolha o segundo.');render();return}
@@ -694,6 +741,7 @@ function onDown(e){
  if(clickedPort?.dataset.portKind==='node')picked={type:'node',id:clickedPort.dataset.portId};
  if(clickedPort?.dataset.portKind==='rack')picked={type:'rack',id:clickedPort.dataset.portId};
  if(dom){const kind=dom.dataset.kind,id=dom.dataset.id;
+   if(kind==='guide')picked={type:'guide',id};
    if(kind==='rack-anchor')picked={type:'rack',id};
    if(kind==='scissor'||kind==='scissor-drive'||kind==='scissor-rotate')picked={type:'scissor',id};
    else if(kind==='gear'||kind==='rack'||kind==='bar')picked={type:kind,id};
@@ -712,7 +760,12 @@ function onDown(e){
  }
  if(!picked){if(!e.shiftKey)select(null);drag={kind:'pan',start:{x:e.clientX,y:e.clientY},origin:{x:cam.x,y:cam.y}};stage.setPointerCapture(e.pointerId);stage.classList.add('dragging');return}
  const group=groupForTarget(picked),kind=dom?.dataset.kind;
- if(group){
+ if(picked.type==='guide'){
+   const n=node(picked.id),s=n?.slider;if(!s)return;
+   select('guide',n.id);
+   if(tool==='rotate'){const startQ=(n.x-s.ox)*Math.cos(rad(s.angle))+(n.y-s.oy)*Math.sin(rad(s.angle));drag={kind:'guideRotate',id:n.id,start:p,base:s.angle,startQ};}
+   else drag={kind:'guideMove',id:n.id,previous:p};
+ }else if(group){
    select('scissor',group.id);
    if((kind==='scissor-drive'||kind==='node')&&tool==='select'){
      const id=kind==='scissor-drive'?group.driveId:picked.id,n=node(id);drag={kind:'ikNode',id,start:p,origin:{x:n.x,y:n.y},scissorId:group.id};
@@ -816,7 +869,7 @@ function runInverseGoal(request){
 function onMove(e){
  const p=ptOf(e);pointer=p;
  $('coordBadge').textContent='X '+fmt(p.x,0)+' · Y '+fmt(p.y,0)+' mm';
- if(!drag){if(tool==='joint'){const next=closestPort(p,22/cam.scale,pendingPort);if((hoverPort?portId(hoverPort):null)!==(next?portId(next):null)){hoverPort=next;render()}}else if(pending)render();return}
+ if(!drag){if(tool==='joint'||tool==='unlink'){const next=closestPort(p,22/cam.scale,pendingPort);if((hoverPort?portId(hoverPort):null)!==(next?portId(next):null)){hoverPort=next;render()}}else if(pending)render();return}
  if(drag.kind==='ikNode'){
    const goal={x:drag.origin.x+p.x-drag.start.x,y:drag.origin.y+p.y-drag.start.y};
    runInverseGoal({kind:'node',id:drag.id,x:goal.x,y:goal.y,scissorId:drag.scissorId});
@@ -825,6 +878,18 @@ function onMove(e){
    let delta=a-drag.lastAngle;if(delta>Math.PI)delta-=TAU;if(delta< -Math.PI)delta+=TAU;
    drag.angle+=delta;drag.lastAngle=a;
    runInverseGoal({kind:'gear',id:g.id,angle:drag.angle});
+ }else if(drag.kind==='guideMove'){
+   const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;
+   translateAssembly({type:'guide',id:drag.id},dx,dy);drag.previous=p;
+   solve(95);render();
+ }else if(drag.kind==='guideRotate'){
+   const n=node(drag.id),s=n?.slider;if(!s)return;
+   const delta=Math.atan2(p.y-s.oy,p.x-s.ox)-Math.atan2(drag.start.y-s.oy,drag.start.x-s.ox);
+   let angle=normDeg(drag.base+deg(delta));if(e.shiftKey)angle=Math.round(angle/15)*15;
+   const r=M.racks.find(r=>r.node===n.id);
+   if(r)rotateRack(r,angle);
+   else {s.angle=angle;n.x=s.ox+drag.startQ*Math.cos(rad(angle));n.y=s.oy+drag.startQ*Math.sin(rad(angle));}
+   solve(95);render();
  }else if(drag.kind==='assemblyMove'){
    const dx=p.x-drag.previous.x,dy=p.y-drag.previous.y;translateAssembly(drag.target,dx,dy);drag.previous=p;solve(100);render();
  }else if(drag.kind==='scissorMove'){
@@ -932,8 +997,7 @@ function goPreset(name){pendingPort=null;hoverPort=null;if(name==='scissor'){cre
     const bottom=addRack(-48,radius);node(bottom.node).slider.range=420;bottom.length=190;connectRack(bottom,a,1);
     const other=addRack(orthogonal?radius:-48,orthogonal?-48:-radius);
     node(other.node).slider.range=420;other.length=190;rotateRack(other,orthogonal?90:0);connectRack(other,a,-1);
-  }else if(name==='rackscissor'){
-    M.name='Pinhão + cremalheira + pantógrafo';
+  }else if(name==='rackscissor'){    M.name='Pinhão + cremalheira + pantógrafo';
     const a=g(-110,100,'gear',24),r=addRack(-110,100-a.radius-RACK_CLEARANCE);r.length=230;
     node(r.node).slider.range=240;connectRack(r,a,-1);
     const sg=createScissor(3,110,140,false);attachRackScissor(r,sg);
@@ -945,7 +1009,7 @@ function goPreset(name){pendingPort=null;hoverPort=null;if(name==='scissor'){cre
   }else M.name='Projeto sem título';
   $('projectTitle').textContent=M.name;solve(200);renderProperties();requestAnimationFrame(fit);updateTime();$('examplesModal').classList.remove('show');setTool('select');
 }
-function serialize(){return {version:12,app:'Kinetika',project:M}}
+function serialize(){return {version:13,app:'Kinetika',project:M}}
 function download(name,contents,mime){let blob=new Blob([contents],{type:mime}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),400)}
 function exportJSON(){download((M.name||'mecanismo').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-')+'.json',JSON.stringify(serialize(),null,2),'application/json');toast('Projeto exportado em JSON.')}
 function exportSVG(){const old=stage.getAttribute('viewBox'),content=`<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="${old}" width="1400" height="900">${sceneSVG()}</svg>`;download('kinetika-mecanismo.svg',content,'image/svg+xml');toast('Desenho SVG exportado.')}
@@ -1209,10 +1273,13 @@ $('properties').addEventListener('input',e=>{const anchor=e.target.closest('[dat
   const slider=e.target.closest('[data-rack-slider]');if(!slider)return;playing=false;updatePlay();manualRackPosition(rack(slider.dataset.rackSlider),Number(slider.value),true)});
 $('properties').addEventListener('change',e=>{let p=e.target.closest('[data-prop]');if(p)applyProperty(p.dataset.prop,p.value,p.checked)});
 $('properties').addEventListener('click',e=>{let act=e.target.closest('[data-act]');if(!act)return;if(act.dataset.act==='fit')fit();
+ if(act.dataset.act==='detachJoint'||act.dataset.act==='detachPoint'){detachJoint(act.dataset.linkId);commitChange()}
+ if(act.dataset.act==='moveGuide'&&sel?.type==='guide'){setTool('move');toast('Arraste o trilho para movimentar a guia e a montagem conectada.')}
+ if(act.dataset.act==='rotateGuide'&&sel?.type==='guide'){setTool('rotate');toast('Arraste a linha da guia para ajustar a orientação.')}
  if(['draftBar','lockBar'].includes(act.dataset.act)&&sel?.type==='bar'){
    const b=bar(sel.id);if(b){if(act.dataset.act==='draftBar'){b.dimensionMode='draft';toast('✎ Dimensionamento ativado: experimente até definir a cota.')}else{const a=node(b.a),z=node(b.b);b.length=dist(a,z);b.dimensionMode='locked';toast('🔒 Comprimento fixado em '+fmt(b.length,2)+' mm. Simulações não podem alterá-lo.')}solve(120);render();renderProperties();commitChange()}
  }if(act.dataset.act==='detachPoint'){removePointLink(act.dataset.linkId)}if(['anchorStart','anchorCenter','anchorEnd'].includes(act.dataset.act)&&sel?.type==='rack'){const r=rack(sel.id);const pos=act.dataset.act==='anchorStart'?-r.length/2+6:act.dataset.act==='anchorEnd'?r.length/2-6:0;setRackAnchor(r,pos);solve(120);renderProperties();render();}if(act.dataset.act==='unlinkPin'){const l=sel?.type==='rack'?rackLink(sel.id):sel?.type==='scissor'?scissorLink(sel.id):null;if(l){detachPinLink(l.id);solve(100);renderProperties();render();}}if(act.dataset.act==='alignSelectionX')useTwoSelection('x');if(act.dataset.act==='alignSelectionY')useTwoSelection('y');if(act.dataset.act==='delete'&&sel)deleteItem(sel.type,sel.id);if(act.dataset.act==='disconnectRack'&&sel?.type==='rack'){disconnectRack(rack(sel.id));solve();renderProperties();render();toast('Cremalheira desconectada; permanece orientável.')}if(act.dataset.act==='stopMotor'){M.gears.forEach(g=>g.baseAngle=g.angle);removeMotors();playing=false;t=0;updatePlay();solve();render();renderProperties();toast('Acionamento removido.')}if(['motor','spring'].includes(act.dataset.act)&&sel){let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):gear(sel.id);if(obj&&makeMotor(sel.type,obj,act.dataset.act))renderProperties()}if(act.dataset.act==='eccentric'&&sel?.type==='gear'){let nn=addFollower(gear(sel.id));select('node',nn.id);solve()}});
-window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoProject();else undoProject();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoProject();return}if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel){deleteItem(sel.type,sel.id);commitChange()}}const keys={j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
+window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoProject();else undoProject();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoProject();return}if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel){deleteItem(sel.type,sel.id);commitChange()}}const keys={u:'unlink',j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
 let previous=0;function tick(ms){if(!previous)previous=ms;const dt=clamp((ms-previous)/1000,0,.05);previous=ms;if(playing){t+=dt*speed;solve();render();updateTime()}requestAnimationFrame(tick)}
 new ResizeObserver(()=>render()).observe(stage);
 goPreset('rackdual');select('rack',M.racks[1].id);
@@ -1220,3 +1287,43 @@ try{const raw=localStorage.getItem(AUTOSAVE_KEY);if(raw){const saved=JSON.parse(
 history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
 
 // KINÉTIKA V11 — percurso amostrado.
+
+// V13 · Assistente de projetos: recomendações locais + IA opcional via Netlify.
+let advisorPlan=null,advisorOnline=false,advisorBusy=false;
+function advisorHtml(plan){
+ const p=normalizeAdvisorPlan(plan);
+ return `<div class="advisor-result-head"><span class="advisor-tag">${p.mode==='ai'?'IA conectada · sugestão':'Biblioteca local · sugestão'}</span><h3>${str(p.title)}</h3><p>${str(p.explanation)}</p></div><div class="advisor-layout"><div><strong>Montagem proposta</strong><ol>${p.steps.map(step=>`<li>${str(step)}</li>`).join('')}</ol></div><div><strong>Restrições e cuidados</strong><ul>${p.warnings.map(w=>`<li>${str(w)}</li>`).join('')}</ul></div></div>${p.template==='none'?'<p class="advisor-note">Esta proposta ainda não tem gerador automático de peças. Utilize as ferramentas da biblioteca.</p>':`<button class="btn primary" id="advisorApply">＋ Adicionar montagem ao projeto atual</button><p class="advisor-note">Apenas modelos prontos e verificados são inseridos. A IA não altera diretamente sua montagem.</p>`}`;
+}
+async function advisorStatus(){
+ const badge=$('advisorStatus');if(!badge)return;
+ badge.textContent='Verificando disponibilidade…';
+ try{const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),3500);const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);const data=await res.json();advisorOnline=!!data.available;badge.textContent=advisorOnline?'IA online disponível · código de acesso necessário':'Modo local: biblioteca sem IA online';}catch{advisorOnline=false;badge.textContent='Modo local: biblioteca sem IA online';}
+ $('advisorAccessRow').hidden=!advisorOnline;
+}
+function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisorResult').innerHTML=advisorHtml(advisorPlan);}
+async function askAdvisor(){
+ if(advisorBusy)return;const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo em uma frase.';return;}
+ advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=advisorOnline?'Consultando IA…':'Gerando sugestão local…';
+ try{
+  if(advisorOnline){const response=await fetch('/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':$('advisorAccess').value},body:JSON.stringify({question,project:modelSummary(M)})});const result=await response.json();if(!response.ok)throw Error(result.error||'Falha na IA.');showAdvisorPlan({...result.plan,mode:'ai'});$('advisorStatus').textContent='Resposta da IA recebida. Confira as restrições antes de inserir.';}
+  else{showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent='Sugestão da biblioteca local; não foi usada IA online.';}
+ }catch(err){showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent=`${String(err.message).slice(0,110)} · Usando biblioteca local.`;}
+ finally{advisorBusy=false;$('advisorAsk').disabled=false;}
+}
+function addAdvisorTemplate(){
+ if(!advisorPlan||advisorPlan.template==='none')return;const snapshot=JSON.stringify(M);
+ try{
+  playing=false;updatePlay();
+  if(advisorPlan.template==='cross_racks'){
+   const maxX=M.nodes.length?Math.max(...M.nodes.map(n=>n.x)):cam.x;
+   const centerX=M.nodes.length?maxX+270:cam.x,centerY=M.nodes.length?(Math.min(...M.nodes.map(n=>n.y))+Math.max(...M.nodes.map(n=>n.y)))/2:cam.y;
+   const made=appendCrossRacks(M,centerX,centerY);solve(120);select('gear',made.gearId);toast('Quatro cremalheiras foram adicionadas. Gire o pinhão e inspecione as interferências 2D.');
+  }else if(advisorPlan.template==='scissor'){createScissor(3,110,140,false);toast('Pantógrafo adicionado, sem apagar o projeto atual.');}
+  commitChange();$('advisorModal').classList.remove('show');fit();
+ }catch(err){M=JSON.parse(snapshot);solve();render();toast('Não foi possível inserir a montagem: '+err.message,true)}
+}
+$('advisorBtn').addEventListener('click',()=>{$('advisorModal').classList.add('show');advisorStatus()});
+$('advisorAsk').addEventListener('click',askAdvisor);
+$('advisorQuestion').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')askAdvisor()});
+$('advisorResult').addEventListener('click',e=>{if(e.target.closest('#advisorApply'))addAdvisorTemplate()});
+document.querySelectorAll('[data-advisor-prompt]').forEach(button=>button.addEventListener('click',()=>{$('advisorQuestion').value=button.dataset.advisorPrompt;askAdvisor()}));
