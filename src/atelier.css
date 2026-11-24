@@ -167,29 +167,36 @@ html,body { background:var(--bg); color:var(--ink); font-family:Inter,'Pretendar
   .app{min-height:0}.playbar{min-height:62px;padding:7px}.left,.right{padding-top:10px}.section-title{margin:14px 8px 7px}
 }
 @media (prefers-reduced-motion:reduce){.btn,.tool{transition:none!important}}
-button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
-#saveBadge{background:#213833b9;color:#b4d3c4;font-size:9px;letter-spacing:.1em}
+
+/* V7 · diagnostic and undo/redo affordances */
+button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important;transform:none!important}
+#saveBadge{background:#213833b9;color:#b4d3c4;font-size:9px;letter-spacing:.12em;user-select:none}
 .diagnostic-modal{width:min(750px,95vw);max-height:min(85dvh,850px);overflow-y:auto}
 .diag-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
-.diag-metric{border:1px solid #dfe6de;border-radius:13px;background:#f4f7f2;padding:14px 12px}
-.diag-metric strong{display:block;font-size:26px;color:#273f3c;margin:6px 0;font-variant-numeric:tabular-nums}
-.diag-metric span{font-size:10px;color:#768981}
-.diag-status{display:inline-flex;border:1px solid #cadece;background:#edf7ed;color:#2b6751;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:750}
+.diag-metric{border:1px solid #dfe6de;border-radius:13px;background:#f4f7f2;padding:14px 12px;min-height:92px}
+.diag-metric strong{display:block;font-size:26px;font-weight:730;letter-spacing:-.04em;color:#273f3c;font-variant-numeric:tabular-nums;margin:6px 0 4px}
+.diag-metric span{font-size:10px;color:#768981;line-height:1.4}
+.diag-status{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid #cadece;background:#edf7ed;color:#2b6751;border-radius:999px;font-weight:750;font-size:11px}
 .diag-status.error{border-color:#efd5cf;background:#fbebe8;color:#a0473f}
-.diag-issues{display:grid;gap:8px;margin:16px 0}
-.diag-issue{border:1px solid #e0e4dd;border-radius:12px;padding:11px 14px;background:#fff}
-.diag-issue strong{font-size:12px;color:#2e4b45}.diag-issue p{font-size:11px!important;margin:3px 0 0!important}
-.diag-issue.error{border-left:3px solid #bb665b}.diag-issue.warning{border-left:3px solid #bd985c}.diag-issue.info{border-left:3px solid #5c9587}
-.diag-caveat{font-size:11px;color:#82908b;border-top:1px solid #e0e5dd;padding-top:12px;margin:15px 0;line-height:1.6}
-@media(max-width:780px){.diag-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#saveBadge{display:none}#undoBtn,#redoBtn{min-width:28px;padding:6px!important}}
+.diag-status.locked{border-color:#d9ded9;background:#ebeeee;color:#556867}
+.diag-issues{display:grid;gap:8px;margin:16px 0 0}
+.diag-issue{border:1px solid #e0e4dd;border-radius:12px;padding:11px 14px;background:#fff;line-height:1.5}
+.diag-issue strong{display:block;font-size:12px;color:#2e4b45}
+.diag-issue p{margin:3px 0 0!important;font-size:11px!important;color:#72827c!important}
+.diag-issue.error{border-left:3px solid #bb665b}
+.diag-issue.warning{border-left:3px solid #bd985c}
+.diag-issue.info{border-left:3px solid #5c9587}
+.diag-caveat{font-size:11px;color:#82908b;border-top:1px solid #e0e5dd;padding-top:12px;margin-top:15px;line-height:1.6}
+@media(max-width:780px){.diag-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#diagnoseBtn{padding:7px 9px}.head-actions{gap:3px}#undoBtn,#redoBtn{min-width:28px;padding:6px!important}#saveBadge{display:none}}
 
-/* V8 — estado do solucionador */
-#solverBadge{background:rgba(199,235,220,.92);border-color:#80bda7;color:#215b4b;font-weight:750}
+/* KINÉTIKA V8 — solver status */
+#solverBadge{background:rgba(199,235,220,.92);border-color:#80bda7;color:#215b4b;font-weight:750;letter-spacing:.045em}
 #solverBadge.solver-warning{background:rgba(252,230,206,.95);border-color:#c9a77a;color:#80551e}
+.diag-v8-summary{padding:11px 13px;margin:7px 0 14px;border-radius:12px;background:#eef5ef;border:1px solid #d6e4db;color:#42645a;font-size:11px;line-height:1.6}
 @media(max-width:780px){#solverBadge{font-size:9px;padding:5px 7px}}
 
-/* V10 · Inspeção geométrica. */
-.geometry-badge{cursor:pointer;font:inherit;border:1px solid #527b78;background:#23443c;color:#bce9d5}
+/* V10 · Inspeção geométrica: alerts legíveis, sem bloquear edição em desktop ou touch. */
+.geometry-badge{cursor:pointer;font:inherit;border:1px solid #527b78;background:#23443c;color:#bce9d5;transition:background .14s;}
 .geometry-badge:hover{background:#31564e}
 .geometry-badge.geometry-danger{background:#6a3230;color:#ffd4cf;border-color:#b8675f}
 .geometry-badge.geometry-caution{background:#57422b;color:#ffe0a3;border-color:#a2824d}
@@ -197,7 +204,7 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
 .geometry-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px}
 .geometry-metric{border:1px solid #dfe3dc;border-radius:12px;padding:16px;background:#f2f4ee;display:flex;flex-direction:column;gap:4px}
 .geometry-metric strong{font-size:25px;letter-spacing:-.035em;color:#2e4944}
-.geometry-metric small{font-size:10px;color:#75847b}
+.geometry-metric small{font-size:10px;color:#75847b;letter-spacing:.025em}
 .geometry-info{margin:12px 2px 16px;color:#74847b;font-size:11px;line-height:1.6}
 .geometry-row{background:#fff;border:1px solid #e1e5dd;border-left:3px solid #8fa79c;border-radius:11px;padding:12px 14px;margin-top:8px}
 .geometry-row.collision{border-left-color:#c76861;background:#fff9f7}
@@ -212,3 +219,43 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
 .geometry-toggle{display:flex;gap:9px;align-items:center;font-size:12px;color:#526c60}
 .geometry-toggle input{accent-color:#3b8b78}
 @media(max-width:700px){.geometry-badge{display:none}.geometry-metrics{gap:6px}.geometry-metric{padding:12px 9px}.geometry-metric strong{font-size:19px}.geometry-row-head{align-items:flex-start;flex-direction:column;gap:3px}}
+
+/* KINÉTIKA V11 / Estudo de movimento ao longo do tempo */
+.sweep-modal{width:min(1100px,96vw);max-width:1100px;max-height:min(94dvh,960px);overflow-y:auto;scrollbar-color:#bdcfc6 transparent}
+.sweep-settings{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:22px 0 10px}
+.sweep-settings label{display:flex;flex-direction:column;gap:5px;color:#435f57;font-size:12px;font-weight:750}
+.sweep-settings label span{font-weight:500;color:#84958c;font-size:10px}
+.sweep-settings input,.sweep-settings select{border:1px solid #d1ded5;border-radius:10px;padding:10px;background:#fff;color:#233d39;min-height:41px;min-width:110px}
+.sweep-explainer,.sweep-caveat{font-size:11px!important;line-height:1.55!important;color:#7d8d85!important}
+.sweep-progress{display:flex;align-items:center;gap:12px;margin:15px 0;color:#537d6e;font-size:11px}
+.sweep-progress-track{width:min(280px,50vw);height:6px;background:#dce5dd;border-radius:10px;overflow:hidden}
+.sweep-progress-track span{display:block;width:0%;height:100%;background:#398879;transition:width .15s ease}
+.sweep-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:20px 0 15px}
+.sweep-metric{border:1px solid #dce3dc;background:#f5f7f2;padding:15px;border-radius:13px;min-height:78px}
+.sweep-metric strong{display:block;font-size:21px;font-weight:780;letter-spacing:-.03em;color:#27473e}
+.sweep-metric small{display:block;font-size:10px;color:#789084;margin-top:6px;line-height:1.4}
+.sweep-workbench{display:grid;grid-template-columns:minmax(0,1.16fr) minmax(0,1fr);gap:14px}
+.sweep-preview-panel,.sweep-events-panel{border:1px solid #dfe5dc;border-radius:15px;background:#fcfcf9;padding:15px;min-width:0}
+.sweep-section-title{font-size:10px;letter-spacing:.09em;font-weight:800;color:#6d8c7d;display:flex;justify-content:space-between;gap:6px;margin:0 0 9px}
+#sweepPreview{width:100%;display:block;min-height:190px;aspect-ratio:1.65;background:radial-gradient(ellipse at center,#1b3436,#102025);border-radius:10px}
+.sweep-timeline{display:flex;gap:1px;height:21px;padding:4px 1px;margin-top:10px;border-radius:5px;background:#edf1eb}
+.sweep-timeline span{display:block;flex:1;min-width:1px;border-radius:1px;background:#7eb7a0;cursor:pointer}
+.sweep-timeline span.near{background:#8da9c5}.sweep-timeline span.collision{background:#d66c64}.sweep-timeline span.singularity{background:#e4ad5d}.sweep-timeline span.invalid{background:#9c9fa3}
+#sweepCursor{width:100%;accent-color:#397e74;margin:9px 0 8px;cursor:pointer}
+.sweep-legend{display:flex;gap:11px;flex-wrap:wrap;font-size:9px;color:#71827a;align-items:center}
+.sweep-legend span{display:inline-flex;gap:4px;align-items:center}
+.sweep-dot{width:7px;height:7px;border-radius:50%;display:inline-block}.sweep-dot.red{background:#d66c64}.sweep-dot.amber{background:#e4ad5d}.sweep-dot.blue{background:#8da9c5}.sweep-dot.gray{background:#9c9fa3}
+#sweepChart{width:100%;display:block;aspect-ratio:3.6;background:#f3f5f0;border:1px solid #e3e7df;border-radius:10px;margin:0 0 15px}
+.sweep-events{max-height:255px;overflow:auto;display:grid;gap:7px;align-content:start}
+.sweep-event{border:1px solid #e1e6dc;border-left:3px solid #c89c5a;background:#fff;padding:10px 11px;text-align:left;border-radius:9px;cursor:pointer;color:#334c43;width:100%}
+.sweep-event.collision{border-left-color:#c9645b}.sweep-event:hover,.sweep-event.active{background:#eaf3ec;border-color:#82b29e}
+.sweep-event strong{display:block;font-size:11px;line-height:1.3;overflow-wrap:anywhere}
+.sweep-event small{display:block;font-size:10px;color:#71887a;margin-top:5px}
+.sweep-no-events{font-size:11px;color:#5b7868;padding:16px;border-radius:11px;background:#f0f5ef}
+.sweep-caveat{padding:10px 0;margin:5px 0!important}
+.sweep-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;margin-top:10px}
+@media(max-width:760px){.sweep-modal{width:100%;max-height:92dvh;padding:18px;border-radius:18px 18px 0 0}.sweep-workbench{grid-template-columns:1fr}.sweep-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.sweep-metric{padding:11px;min-height:66px}.sweep-metric strong{font-size:18px}.sweep-events{max-height:150px}.sweep-settings{gap:8px}.sweep-settings label{flex:1;min-width:105px}.sweep-settings .btn{flex:1}#sweepPreview{min-height:160px}.sweep-actions .btn{flex:1}#sweepBtn{min-width:34px;padding:8px 9px}}
+
+.sweep-progress[hidden],.sweep-settings button[hidden],#sweepResults[hidden]{display:none!important}
+
+/* KINÉTIKA V11 — barra temporal e prévia responsiva. */

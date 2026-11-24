@@ -4,7 +4,8 @@ import {analyzeMechanism} from './diagnostics.js';
 import {ProjectHistory} from './history.js';
 import {solveConstraints} from './solver.js';
 import {analyzeGeometry} from './geometry.js';
-// KINÉTIKA V10 | Cinética inversa + análise de colisões e regiões singulares.
+import {planMotionSweep,capturePose,summarizeMotionSweep,sampleSeverity} from './sweep.js';
+// KINÉTIKA V11 | Cinemática inversa, análise geométrica e varredura de percurso.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
 const TAU=Math.PI*2, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, RACK_CLEARANCE=9;
@@ -974,6 +975,152 @@ $('geometryRefresh').onclick=showGeometry;
 $('geometryOverlayToggle').onchange=e=>{geometryOverlayVisible=e.target.checked;render()};
 $('geometryBadge').onclick=showGeometry;
 
+// V11 — varredura temporal discreta, isolada do projeto em edição.
+let sweepSession=null,sweepRunning=false,sweepCancelled=false;
+const sweepClone=obj=>structuredClone(obj);
+const sweepFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+function openSweep(){
+ playing=false;updatePlay();
+ const plan=planMotionSweep(M);
+ $('sweepModal').classList.add('show');
+ $('sweepResults').hidden=true;$('sweepProgress').hidden=true;
+ $('sweepDuration').value=plan.ok?String(Math.round(plan.duration*100)/100):'8';
+ $('sweepExplanation').textContent=plan.ok?
+ plan.virtualDrive?`Ensaio virtual: ${plan.virtualDrive.label}. O sistema percorrerá uma faixa geométrica idealizada sem adicionar motor ao seu projeto. Os segundos são apenas uma escala de referência; não representam velocidade física.`:`${plan.motors.length} acionamento(s) identificado(s): ${plan.motors.map(m=>m.label).join(', ')}. ${plan.approximateCycle?'Com vários acionamentos ou ciclos longos, a duração escolhida não garante cobrir todas as configurações combinadas.':''} A amostragem discreta pode deixar passar interferências entre quadros.`:
+ plan.reason;
+}
+function closeSweep(){
+ if(sweepRunning)sweepCancelled=true;
+ $('sweepModal').classList.remove('show');
+ // A análise nunca altera M. Mesmo ao fechar durante uma varredura, o loop é interrompido.
+}
+function sweepPreviewSVG(model,sample){
+ const p=sample.pose; if(!p)return {viewBox:'0 0 400 240',markup:'<text x="20" y="35" fill="#f0d0ab">Pose indisponível</text>'};
+ const pos=new Map(p.nodes.map(([id,x,y])=>[id,{x,y}]));
+ const rot=new Map(p.gears.map(([id,a])=>[id,a]));
+ const pts=[],items=[];
+ const push=(x,y,margin=0)=>{if(Number.isFinite(x)&&Number.isFinite(y))pts.push([x-margin,y-margin],[x+margin,y+margin])};
+ const f=n=>Number(n||0).toFixed(2);
+ for(const b of model.bars||[]){const a=pos.get(b.a),z=pos.get(b.b);if(!a||!z)continue;push(a.x,a.y,7);push(z.x,z.y,7);items.push(`<path d="M${f(a.x)},${f(a.y)} L${f(z.x)},${f(z.y)}" stroke="#81c4ad" stroke-width="9" stroke-linecap="round" fill="none"/>`)}
+ for(const g of model.gears||[]){const c=pos.get(g.node);if(!c)continue;const radius=g.radius||20,angle=rot.get(g.id)||0;push(c.x,c.y,radius+10);items.push(`<circle cx="${f(c.x)}" cy="${f(c.y)}" r="${f(radius)}" fill="#233f42" stroke="#bdca96" stroke-width="3"/><line x1="${f(c.x)}" y1="${f(c.y)}" x2="${f(c.x+radius*.8*Math.cos(angle))}" y2="${f(c.y+radius*.8*Math.sin(angle))}" stroke="#b9d7bc" stroke-width="5" stroke-linecap="round"/>`)}
+ for(const r of model.racks||[]){const c=pos.get(r.node),n=model.nodes.find(n=>n.id===r.node);if(!c||!n?.slider)continue;const a=n.slider.angle*Math.PI/180,dx=Math.cos(a)*(r.length/2),dy=Math.sin(a)*(r.length/2);push(c.x-dx,c.y-dy,14);push(c.x+dx,c.y+dy,14);items.push(`<line x1="${f(c.x-dx)}" y1="${f(c.y-dy)}" x2="${f(c.x+dx)}" y2="${f(c.y+dy)}" stroke="#e6bd7c" stroke-width="16" stroke-linecap="round"/>`)}
+ for(const [id,x,y] of p.nodes){push(x,y,3);items.push(`<circle cx="${f(x)}" cy="${f(y)}" r="3.3" fill="#dcf5e8"/>`)}
+ for(const e of [...(sample.report?.collisions||[]),...(sample.report?.singularities||[])]){
+  if(!e.at||!Number.isFinite(e.at.x)||!Number.isFinite(e.at.y))continue;
+  const color=e.kind==='collision'||e.gap<-.65?'#ff8378':'#eebd6c';
+  items.push(`<circle cx="${f(e.at.x)}" cy="${f(e.at.y)}" r="13" stroke="${color}" stroke-width="2.6" fill="${color}" fill-opacity=".16"/>`);
+ }
+ if(!pts.length)return {viewBox:'0 0 400 240',markup:'<text x="18" y="30" fill="#b9d5ca">Nenhum componente geométrico</text>'};
+ const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);const minX=Math.min(...xs),minY=Math.min(...ys),w=Math.max(70,Math.max(...xs)-minX),h=Math.max(70,Math.max(...ys)-minY),margin=Math.max(24,Math.max(w,h)*.06);
+ const vb=[minX-margin,minY-margin,w+2*margin,h+2*margin];
+ return {viewBox:vb.map(f).join(' '),markup:`<rect x="${f(vb[0])}" y="${f(vb[1])}" width="${f(vb[2])}" height="${f(vb[3])}" fill="#14272b"/>${items.join('')}`};
+}
+function updateSweepPreview(index){
+ if(!sweepSession?.samples?.length)return;
+ index=clamp(Math.round(index),0,sweepSession.samples.length-1);
+ const s=sweepSession.samples[index],frameCount=sweepSession.samples.length;
+ $('sweepCursor').max=String(frameCount-1);$('sweepCursor').value=String(index);
+ $('sweepFrameLabel').textContent=`${(index+1).toString().padStart(2,'0')}/${frameCount} · ${fmt(s.time,2)}s`;
+ const visual=sweepPreviewSVG(sweepSession.model,s);$('sweepPreview').setAttribute('viewBox',visual.viewBox);$('sweepPreview').innerHTML=visual.markup;
+ const marker=$('sweepChartMarker');if(marker){const x=30+index/(frameCount-1)*485;marker.setAttribute('x1',x);marker.setAttribute('x2',x)}
+ document.querySelectorAll('#sweepEvents [data-sweep-event]').forEach(el=>{const from=Number(el.dataset.from),to=Number(el.dataset.to);el.classList.toggle('active',index>=from&&index<=to)});
+}
+function sweepGapChart(samples){
+ const valid=samples.filter(s=>s.valid&&Number.isFinite(s.report?.minGap)),values=valid.map(s=>s.report.minGap),bound=Math.max(10,Math.min(65,...values.map(v=>Math.abs(v))));
+ const range=Number.isFinite(bound)?bound:10,px=i=>30+i/(samples.length-1)*485,py=v=>78-v/range*55;
+ // Não ligar visualmente quadros em que o resolvedor não convergiu.
+ const paths=[];let seg='';for(let i=0;i<samples.length;i++){const s=samples[i];if(!s.valid||!Number.isFinite(s.report?.minGap)){if(seg)paths.push(seg);seg='';continue}seg+=(seg?'L':'M')+`${px(i).toFixed(1)},${py(clamp(s.report.minGap,-range,range)).toFixed(1)} `;}if(seg)paths.push(seg);
+ return `<rect width="540" height="150" rx="10" fill="#f4f6f2"/><path d="M30 78 H515" stroke="#c86f63" stroke-width="1.5" stroke-dasharray="5 4"/><text x="8" y="19" fill="#678076" font-size="11">+${fmt(range,0)}</text><text x="16" y="81" fill="#a96861" font-size="11">0</text><text x="8" y="135" fill="#678076" font-size="11">−${fmt(range,0)}</text>${paths.map(d=>`<path d="${d}" fill="none" stroke="#3c8b79" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}<line id="sweepChartMarker" x1="30" x2="30" y1="12" y2="140" stroke="#313f38" stroke-width="1.3" stroke-dasharray="3 3"/><text x="30" y="146" fill="#6f8578" font-size="10">${fmt(samples[0].time,1)} s</text><text x="515" y="146" text-anchor="end" fill="#6f8578" font-size="10">${fmt(samples.at(-1).time,1)} s</text>`;
+}
+function renderSweepResults(){
+ const {model,samples,summary,plan}=sweepSession;
+ $('sweepResults').hidden=false;
+ const metric=(value,label)=>`<div class="sweep-metric"><strong>${str(value)}</strong><small>${str(label)}</small></div>`;
+ $('sweepMetrics').innerHTML=metric(summary.collisionEvents,'Trechos com interferência')+metric(summary.singularityEvents,'Trechos críticos')+metric(summary.minimumGap===null?'—':`${fmt(summary.minimumGap,1)} mm`,'Menor folga geométrica')+metric(summary.invalid,'Posições não resolvidas');
+ $('sweepTimeline').innerHTML=samples.map((s,i)=>`<span data-sweep-frame="${i}" class="${sampleSeverity(s)}" title="${fmt(s.time,2)} s · ${sampleSeverity(s)}"></span>`).join('');
+ $('sweepChart').innerHTML=sweepGapChart(samples);
+ $('sweepEventCount').textContent=String(summary.intervals.length);
+ $('sweepEvents').innerHTML=summary.intervals.length?summary.intervals.slice(0,65).map((e,i)=>`<button class="sweep-event ${e.kind}" data-sweep-event="${i}" data-from="${e.startIndex}" data-to="${e.endIndex}"><strong>${e.kind==='collision'?'●':'△'} ${str(e.label)}</strong><small>${fmt(e.startTime,2)}–${fmt(e.endTime,2)} s · ${e.kind==='collision'&&Number.isFinite(e.peakGap)?`Penetração máx. ${fmt(Math.abs(e.peakGap),1)} mm`:'posição crítica'}</small></button>`).join(''):'<div class="sweep-no-events">Nenhuma interferência ou singularidade foi encontrada nas posições amostradas. Isso não comprova ausência de colisões entre elas.</div>';
+ $('sweepCaveat').textContent=`${samples.length} quadros em ${fmt(plan.duration,2)} s (passo ≈ ${fmt(plan.duration/(samples.length-1),3)} s). ${summary.minimumAt?.pair?`Menor folga: ${summary.minimumAt.pair.label} em ${fmt(summary.minimumAt.time,2)} s. `:''}${summary.invalid?'Há posições cuja geometria não foi resolvida com precisão suficiente; os alertas nesses trechos são inconclusivos. ':''}${summary.truncated?'Parte das peças não foi examinada pelo limite de segurança de cálculo. ':''}${plan.virtualDrive?'Acionamento virtual: não representa tempo ou velocidade física. ':''}Amostragem discreta em 2D; perfis aproximados, sem espessura real em Z, atrito ou forças. Sem garantir a ausência de interferências entre quadros.`;
+ updateSweepPreview(summary.firstCollision??summary.intervals[0]?.startIndex??0);
+}
+async function runMotionSweep(){
+ if(sweepRunning)return;
+ const plan=planMotionSweep(M,{duration:Number($('sweepDuration').value),steps:Number($('sweepSteps').value),start:0});
+ if(!plan.ok){$('sweepExplanation').textContent=plan.reason;toast(plan.reason,true);return}
+ sweepCancelled=false;sweepRunning=true;sweepSession=null;
+ playing=false;updatePlay();
+ const original=M,originalTime=t,originalInfo=lastSolveInfo,originalResidual=maxResidual,originalManual=manualDrive,originalReport=geometryReport,originalCheck=geometryLastCheck;
+ const working=sweepClone(original),samples=[];
+ let virtualRange=null;
+ if(plan.virtualDrive){
+  const v=plan.virtualDrive;
+  M=working;
+  if(v.kind==='gear'){
+   const g=gear(v.id),origin=g.angle,rel=gearRelations(g);
+   const low=boundGearAngle(g,origin-Math.PI,rel),high=boundGearAngle(g,origin+Math.PI,rel);
+   virtualRange={lo:low.invalid?origin-Math.PI:low.value,hi:high.invalid?origin+Math.PI:high.value};
+  }else if(v.kind==='bar'){
+   const b=bar(v.id),a=node(b.a),z=node(b.b);virtualRange={anchor:a.fixed?'a':'b',start:Math.atan2(z.y-a.y,z.x-a.x)};
+  }
+  M=original;
+ }
+ $('sweepRun').disabled=true;$('sweepCancel').hidden=false;$('sweepProgress').hidden=false;$('sweepResults').hidden=true;$('sweepProgressBar').style.width='0%';$('sweepProgressLabel').textContent='Preparando varredura…';
+ $('sweepExplanation').textContent='Varrendo o percurso; o projeto original permanece intacto.';
+ let error=null;
+ try{
+  for(let i=0;i<plan.steps;i++){
+   if(sweepCancelled)break;
+   const currentTime=plan.start+plan.duration*i/(plan.steps-1);
+   M=working;t=currentTime;manualDrive=null;
+   if(plan.virtualDrive){const v=plan.virtualDrive,fraction=i/(plan.steps-1);
+    if(v.kind==='gear')manualDrive={kind:'gear',id:v.id,angle:virtualRange.lo+(virtualRange.hi-virtualRange.lo)*fraction};
+    if(v.kind==='node'){const n=node(v.id),s=n.slider,an=rad(s.angle),q=(fraction-.5)*s.range;manualDrive={kind:'node',id:v.id,x:s.ox+Math.cos(an)*q,y:s.oy+Math.sin(an)*q};}
+    if(v.kind==='scissor'){const sc=scissor(v.id),limits=scissorHeightLimits(sc);sc.height=limits.lo+(limits.hi-limits.lo)*fraction;placeScissor(sc);}
+    if(v.kind==='bar')manualDrive={kind:'bar',id:v.id,anchor:virtualRange.anchor,angle:virtualRange.start-Math.PI+TAU*fraction};
+   }
+   solve(96);
+   const report=analyzeGeometry(M,{maxParts:180,maxIssues:100});
+   const valid=Number.isFinite(maxResidual)&&maxResidual<=.85&&lastSolveInfo.status!=='too-large';
+   samples.push({time:currentTime,valid,residual:maxResidual,pose:capturePose(M),report});
+   // Restaurar antes de renderizar o progresso; a UI nunca manipula o modelo temporário.
+   M=original;t=originalTime;lastSolveInfo=originalInfo;maxResidual=originalResidual;manualDrive=originalManual;
+   if(i%4===3||i===plan.steps-1){
+    const percentage=(i+1)/plan.steps*100;
+    $('sweepProgressBar').style.width=percentage.toFixed(1)+'%';
+    $('sweepProgressLabel').textContent=`${i+1}/${plan.steps} posições analisadas`;
+    await sweepFrame();
+   }
+  }
+ }catch(e){error=e;console.error('Varredura:',e)}
+ finally{
+  M=original;t=originalTime;lastSolveInfo=originalInfo;maxResidual=originalResidual;manualDrive=originalManual;geometryReport=originalReport;geometryLastCheck=originalCheck;
+  sweepRunning=false;$('sweepRun').disabled=false;$('sweepCancel').hidden=true;$('sweepProgress').hidden=true;
+ }
+ if(error){$('sweepExplanation').textContent='Não foi possível concluir a análise: '+error.message;toast('Erro ao analisar percurso.',true);return}
+ if(sweepCancelled){$('sweepExplanation').textContent='Varredura interrompida. Nenhuma alteração foi feita no projeto.';return}
+ const summary=summarizeMotionSweep(samples);sweepSession={model:sweepClone(original),plan,samples,summary};
+ $('sweepExplanation').textContent=`Percurso amostrado: ${summary.collisionEvents} trecho(s) de interferência, ${summary.singularityEvents} trecho(s) críticos. Clique em um intervalo ou deslize o marcador para inspecionar.`;
+ renderSweepResults();
+}
+function exportSweepCSV(){if(!sweepSession)return;
+ const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+ const columns=['Amostra','Tempo (s)','Estado','Interferências','Singularidades','Proximidades','Folga mínima (mm)','Par de peças','Erro residual (mm)'];
+ const content=[columns.map(esc).join(';'),...sweepSession.samples.map((s,i)=>[i+1,s.time.toFixed(5),sampleSeverity(s),s.report?.collisions.length||0,s.report?.singularities.length||0,s.report?.near.length||0,Number.isFinite(s.report?.minGap)?s.report.minGap.toFixed(3):'',s.report?.minPair?.label||'',s.residual.toFixed(5)].map(esc).join(';'))].join('\r\n');
+ download('kinetika-v11-percurso.csv','\uFEFF'+content,'text/csv;charset=utf-8');
+}
+$('sweepBtn').onclick=openSweep;
+$('geometrySweep').onclick=()=>{$('geometryModal').classList.remove('show');openSweep()};
+$('sweepRun').onclick=runMotionSweep;
+$('sweepRerun').onclick=runMotionSweep;
+$('sweepCancel').onclick=()=>{sweepCancelled=true;$('sweepExplanation').textContent='Interrompendo após a amostra atual…'};
+$('sweepExport').onclick=exportSweepCSV;
+$('sweepCursor').oninput=e=>updateSweepPreview(Number(e.target.value));
+$('sweepTimeline').addEventListener('click',e=>{const target=e.target.closest('[data-sweep-frame]');if(target)updateSweepPreview(Number(target.dataset.sweepFrame))});
+$('sweepEvents').addEventListener('click',e=>{const target=e.target.closest('[data-sweep-event]');if(target)updateSweepPreview(Number(target.dataset.from))});
+$('sweepModal').addEventListener('click',e=>{if(e.target===$('sweepModal')||e.target.closest('[data-close="sweepModal"]'))closeSweep()},true);
+window.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sweepModal').classList.contains('show'))closeSweep()},true);
+
 $('undoBtn').onclick=undoProject;$('redoBtn').onclick=redoProject;
 // Complete a gesture as one history step, even when it comprises many pointermove updates.
 stage.addEventListener('pointerup',()=>queueMicrotask(commitChange));
@@ -1015,3 +1162,5 @@ new ResizeObserver(()=>render()).observe(stage);
 goPreset('rackdual');select('rack',M.racks[1].id);
 try{const raw=localStorage.getItem(AUTOSAVE_KEY);if(raw){const saved=JSON.parse(raw);loadJSON(saved);toast('Projeto anterior recuperado do navegador.')}}catch(err){console.warn('Autosave não carregado:',err)}
 history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
+
+// KINÉTIKA V11 — percurso amostrado.

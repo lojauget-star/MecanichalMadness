@@ -1,20 +1,25 @@
-# KINÉTIKA V10 — Interferências e singularidades 2D
+# KINÉTIKA — Mechanical Atelier V11
 
-Novo módulo `src/geometry.js`, com checagem geométrica aproximada de colisões e posições críticas.
+Laboratório de mecanismos planos com engenharia cinemática interativa e interface responsiva. Barras, pivôs, apoios fixos, guias, engrenagens, cremalheiras, polias e pantógrafos podem ser adicionados à mesma montagem, reposicionados, rotacionados e conectados por juntas.
 
-## Novidades
+## V11 · Varredura de percurso e folga geométrica
 
-- △ **Geometria** na barra superior: sobreposição de barras, rodas e cremalheiras, e distância mínima de aproximação.
-- **Vermelho** na bancada: interferência geométrica estimada. **Amarelo**: alinhamento crítico de barras ou pantógrafo no limite de abertura.
-- Exclusão de contatos intencionais em pivôs compartilhados, pinhão-cremalheira vinculado e engrenagens efetivamente engrenadas.
-- Modal com inventário dos alertas, resumo, controle de sobreposição gráfica e recalcular.
-- 13 testes automatizados de proximidade e colinearidade adicionados aos testes existentes.
+Clique em **⤳ Percurso** no cabeçalho (ou **Geometria → Analisar percurso completo**) e execute uma varredura de **41, 81 ou 161 quadros**, escolhendo a duração de 0,25–90 segundos. Se existir um motor ou uma mola idealizada, o simulador percorre seu acionamento no tempo. Sem motor, o editor pode gerar **um ensaio virtual** sobre a rotação de uma roda, o curso de um cursor, a abertura de um pantógrafo ou o giro de uma barra apoiada, **sem modificar o projeto**. Nesse caso, os segundos são apenas uma escala de referência e não representam velocidade física.
 
-## Limitações
+A varredura apresenta:
 
-Os componentes são aproximados por segmentos com espessura e círculos pelo raio primitivo. Uma colisão de envelopes 2D pode ser fisicamente evitada por peças em planos de profundidade diferentes. Pontos mortos são **suspeitas geométricas**, não prova de perda de mobilidade; não se calculam forças, deformações, espessuras reais, tolerâncias de fabricação ou perfis dos dentes. A versão atual não impede automaticamente o movimento ao identificar interferência: ela apenas sinaliza.
+- **Mapa temporal** das interferências geométricas (vermelho), alinhamentos críticos (âmbar), proximidades (azul) e posições não resolvidas (cinza).
+- **Prévia dinâmica selecionável** do mecanismo em qualquer uma das posições amostradas, com navegação por slider e clique nos eventos.
+- **Curva da folga mínima** entre peças não identificadas como um par de contato intencional, destacando valores negativos de penetração de envelopes.
+- **Lista de intervalos** de início e fim de cada colisão ou condição crítica, com os elementos envolvidos e a penetração máxima estimada.
+- **Exportação CSV** com uma linha por amostra, incluindo tempo, ocorrências, menor folga e erro residual.
+- **Progresso e interrupção** de varreduras longas; processamento em pequenos lotes, cedendo tempo à UI.
 
-## Desenvolvimento
+Os cálculos de percurso ocorrem **sobre uma cópia do modelo**. O projeto, o estado do editor e o autosave não são modificados pela inspeção. Amostras com erro de resolução elevado são assinaladas como inconclusivas.
+
+## Instalação e publicação
+
+Requer **Node.js 20.19+** (recomendado 22).
 
 ```bash
 npm install
@@ -24,54 +29,12 @@ npm test
 npm run build
 ```
 
-Netlify: `npm run build`, publish `dist`.
-# KINÉTIKA · Mechanical Atelier V9
+Vite publica a pasta `dist`. O `netlify.toml` inclui comando de build e diretório de saída. Se o Netlify estiver conectado à branch `main` com auto-deploy habilitado, um push dispara uma nova compilação. O GitHub Actions também executa os testes e o build.
 
-Laboratório 2D para montagem e experimentação de mecanismos: barras, pivôs, guias, engrenagens, cremalheiras, polias e pantógrafos. Interface responsiva com orientação livre de peças e vínculos por portas de conexão.
+## Ferramentas do editor
 
-## Executar
+**V** testa o movimento por arraste inverso, **G** reposiciona montagens, **R** rotaciona, **J** conecta pontos compatíveis. Shift+clique seleciona dois objetos para alinhamento dos centros X/Y. O construtor de pantógrafos adiciona um novo mecanismo ao desenho, preservando o projeto atual. Os projetos podem ser exportados e importados em JSON, com histórico de desfazer/refazer e autosave local.
 
-Requer Node.js 20.19+ (recomendado 22).
+## Limitações e interpretação
 
-```sh
-npm install
-npm run dev
-```
-
-Para verificar o código e gerar os arquivos de produção:
-
-```sh
-npm run check
-npm test
-npm run build
-```
-
-No Netlify, o `netlify.toml` usa `npm run build` e publica `dist/`. O push para `main` inicia um deploy se o site estiver conectado e a publicação automática estiver habilitada.
-
-## Novidades da V9 — arraste cinemático inverso
-
-- **Arraste inverso pelo modo Testar (V):** puxar um pivô livre, uma extremidade de barra, uma cremalheira, a borda de uma engrenagem ou a alça de abertura do pantógrafo passa a acionar a cadeia inteira, em vez de reposicionar rigidamente todo o desenho.
-- **Alvo suave:** a posição do cursor é uma intenção, não uma obrigação que estique peças. Em limites cinemáticos, o ponto permanece na configuração admissível mais próxima; uma linha tracejada mostra a distância até o cursor.
-- **Restrições prioritárias:** apoios fixos, comprimento de barras, guias, coincidências, acoplamentos de engrenagens e cremalheiras e geometria de pantógrafos usam o mesmo resolvedor V8, com meta de movimento de menor prioridade.
-- **Motor desacoplado do gesto:** o editor pausa a animação durante o teste; ao soltar a engrenagem sua nova fase torna-se a referência de repouso.
-- **Movimentação de projeto separada:** use **G** para mover uma montagem rigidamente, **R** para alterar a orientação de componentes, e **V** para testar a cinemática.
-- **Testes automatizados adicionais:** posição livre, barra com apoio, limite inalcançável, circuito de quatro-barras, engrenagem com duas cremalheiras, manivela excêntrica e abertura de pantógrafo.
-
-## Validação
-
-`npm run check` e `npm test` foram executados localmente, com 22 testes aprovados. O ambiente local bloqueia downloads npm e a navegação gráfica, portanto o build Vite e a verificação visual ficam para o pipeline GitHub/Netlify. Não há cálculo de forças, colisões, tensões, atrito nem resistência estrutural.
-
-## Interpretação responsável do diagnóstico
-
-O jacobiano é avaliado **na configuração atual** do mecanismo. A mobilidade calculada pode mudar perto de singularidades, e vínculos redundantes não são necessariamente defeitos. A V7 **não substitui o motor de simulação por um solver universal**; ela oferece a base de análise e identifica problemas antes de novas classes de juntas serem introduzidas. Não calcula forças, torque, contato de dentes, atrito, deformação, resistência estrutural ou colisões 3D.
-
-O analisador limita-se a 260 variáveis por acionamento para preservar a responsividade. Esta é uma ferramenta exploratória de cinemática, não uma verificação de segurança de equipamentos físicos.
-
-## Controles
-
-- V testar, G mover, R rotacionar, J unir pontos.
-- Shift+clique para dois objetos no alinhamento X/Y.
-- Clique ◇ Analisar no cabeçalho para ver as restrições e graus de liberdade.
-- Arraste engrenagens pela borda para girá-las; arraste cremalheiras ao longo das guias.
-- Use Criar pantógrafo para inserir um novo módulo sem substituir o projeto atual.
-- Salve o projeto como JSON para compartilhar ou manter backup; o autosave permanece apenas no navegador.
+A inspeção usa **amostragem temporal discreta** e perfis **2D aproximados**: barras como cápsulas, cremalheiras como segmentos espessos e rodas como círculos pelo raio primitivo. Contatos intencionais de engrenagens e articulações são filtrados. Uma interferência pode ser evitada em planos Z diferentes; e uma análise sem colisões nas amostras **não prova passagem livre entre os quadros**. Diminuir o intervalo de amostragem melhora a detecção, mas não a torna contínua. As singularidades são indícios geométricos e não comprovação de travamento. Não são calculados contato real de dentes, forças, torques, atrito, flambagem, resistência, espessura real nem tolerâncias de fabricação. Não substitui CAD/CAE e ensaio de protótipo para validação de segurança.

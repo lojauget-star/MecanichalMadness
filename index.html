@@ -22,6 +22,7 @@
     <button class="btn mini" id="redoBtn" title="Refazer (Ctrl/Cmd+Shift+Z)" aria-label="Refazer" disabled>↷</button>
     <button class="btn" id="diagnoseBtn" title="Analisar graus de liberdade e vínculos" aria-label="Diagnóstico mecânico">◇ <span class="hide-small">Analisar</span></button>
     <button class="btn" id="geometryBtn" title="Inspecionar interferências e singularidades" aria-label="Verificar geometria">△ <span class="hide-small">Geometria</span></button>
+    <button class="btn" id="sweepBtn" title="Analisar todo o percurso de um mecanismo" aria-label="Varrer percurso completo">⤳ <span class="hide-small">Percurso</span></button>
     <button class="btn" id="exportBtn" title="Exportar projeto JSON">↓ <span class="hide-small">Salvar</span></button>
     <button class="btn" id="importBtn" title="Importar projeto JSON">↑ <span class="hide-small">Abrir</span></button>
     <button class="btn mini" id="helpBtn" title="Como usar">?</button>
@@ -74,7 +75,7 @@
 <aside class="right" id="inspector">
   <div class="inspector-head"><div class="overline">Editor paramétrico</div><h2 id="inspectorTitle">Propriedades</h2><p id="inspectorSubtitle">Selecione um componente para modificar seus parâmetros.</p></div>
   <div id="properties"><div class="placeholder">Clique em um pivô, barra, roda ou cremalheira para editar suas propriedades.</div></div>
-  <div class="status-box"><strong>KINÉTIKA V8 · restrições e transmissões no plano</strong><br>Núcleo numérico compartilhado para barras, articulações, guias, pinhões, cremalheiras e pantógrafos; alerta de vínculos incompatíveis. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
+  <div class="status-box"><strong>KINÉTIKA V11 · análise do percurso completo</strong><br>Núcleo numérico compartilhado para barras, articulações, guias, pinhões, cremalheiras e pantógrafos; alerta de vínculos incompatíveis. Não calcula torque, força, atrito real, flexão, colisões ou inércia.</div>
   <div class="footer-note">Dica: <span class="kbd">Esc</span> cancela a operação · <span class="kbd">Espaço</span> inicia/pausa · <span class="kbd">Del</span> exclui seleção.</div>
 </aside>
 </div>
@@ -117,9 +118,26 @@
 <div class="menu-line" style="margin-top:18px"><button class="btn primary" id="diagnoseRefresh">↻ Recalcular</button><button class="btn" data-close="diagnoseModal">Voltar à bancada</button></div>
 </div></div>
 <div class="modal-back" id="geometryModal"><div class="modal diagnostic-modal geometry-modal" role="dialog" aria-modal="true" aria-labelledby="geometryTitle">
-<div class="modal-top"><div><div class="overline">INSPEÇÃO GEOMÉTRICA / V10</div><h2 id="geometryTitle">Interferências e pontos críticos</h2><p>Análise de proximidade entre envelopes mecânicos 2D e alinhamentos críticos de articulações. Não representa colisões dinâmicas com forças.</p></div><button class="btn mini" data-close="geometryModal">✕ Fechar</button></div>
+<div class="modal-top"><div><div class="overline">INSPEÇÃO GEOMÉTRICA / V11</div><h2 id="geometryTitle">Interferências e pontos críticos</h2><p>Análise de proximidade entre envelopes mecânicos 2D e alinhamentos críticos de articulações. Não representa colisões dinâmicas com forças.</p></div><button class="btn mini" data-close="geometryModal">✕ Fechar</button></div>
 <div id="geometryResults" aria-live="polite"></div>
-<div class="menu-line geometry-actions"><label class="geometry-toggle"><input id="geometryOverlayToggle" type="checkbox" checked> Mostrar marcações no desenho</label><button class="btn primary" id="geometryRefresh">↻ Recalcular</button></div>
+<div class="menu-line geometry-actions"><label class="geometry-toggle"><input id="geometryOverlayToggle" type="checkbox" checked> Mostrar marcações no desenho</label><button class="btn" id="geometrySweep">⤳ Analisar percurso completo</button><button class="btn primary" id="geometryRefresh">↻ Recalcular</button></div>
+</div></div>
+<div class="modal-back" id="sweepModal"><div class="modal sweep-modal" role="dialog" aria-modal="true" aria-labelledby="sweepTitle">
+  <div class="modal-top"><div><div class="overline">ANÁLISE TEMPORAL / V11</div><h2 id="sweepTitle">Percurso mecânico</h2><p>Examine colisões, folgas e alinhamentos críticos ao longo do movimento acionado por motor ou mola idealizada.</p></div><button class="btn mini" data-close="sweepModal" aria-label="Fechar análise">✕ Fechar</button></div>
+  <div class="sweep-settings"><label>Duração <span>segundos</span><input type="number" id="sweepDuration" min="0.25" max="90" step="0.25" value="8" inputmode="decimal"></label>
+    <label>Amostragem <span>quadros</span><select id="sweepSteps"><option value="41">41 · Rápida</option><option value="81" selected>81 · Equilibrada</option><option value="161">161 · Detalhada</option></select></label>
+    <button class="btn primary" id="sweepRun">⤳ Executar varredura</button><button class="btn" id="sweepCancel" hidden>Interromper</button></div>
+  <p class="sweep-explainer" id="sweepExplanation">O mecanismo precisa de um acionamento configurado. A análise utiliza amostras, não detecção contínua de colisões.</p>
+  <div class="sweep-progress" id="sweepProgress" hidden><div class="sweep-progress-track"><span id="sweepProgressBar"></span></div><span id="sweepProgressLabel" aria-live="polite">Preparando varredura...</span></div>
+  <div id="sweepResults" hidden>
+    <div class="sweep-metrics" id="sweepMetrics"></div>
+    <div class="sweep-workbench"><div class="sweep-preview-panel"><div class="sweep-section-title">POSIÇÃO INSPECIONADA <span id="sweepFrameLabel"></span></div><svg id="sweepPreview" viewBox="-150 -100 300 200" role="img" aria-label="Pré-visualização do mecanismo na posição selecionada"></svg>
+      <div class="sweep-timeline" id="sweepTimeline" aria-label="Mapa de ocorrências ao longo do percurso"></div><input type="range" id="sweepCursor" min="0" max="80" value="0" step="1" aria-label="Selecionar posição do percurso">
+      <div class="sweep-legend"><span><i class="sweep-dot red"></i>Interferência</span><span><i class="sweep-dot amber"></i>Posição crítica</span><span><i class="sweep-dot blue"></i>Proximidade</span><span><i class="sweep-dot gray"></i>Não resolvido</span></div>
+    </div><div class="sweep-events-panel"><div class="sweep-section-title">FOLGA MÍNIMA (mm)</div><svg id="sweepChart" viewBox="0 0 540 150" aria-label="Gráfico da menor folga entre as peças"></svg><div class="sweep-section-title">TRECHOS IDENTIFICADOS <span id="sweepEventCount"></span></div><div id="sweepEvents" class="sweep-events"></div></div></div>
+    <p class="sweep-caveat" id="sweepCaveat"></p>
+    <div class="sweep-actions"><button class="btn" id="sweepExport">⤓ Exportar CSV</button><button class="btn" id="sweepRerun">↻ Nova varredura</button><button class="btn primary" data-close="sweepModal">Voltar à bancada</button></div>
+  </div>
 </div></div>
 <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
 <script type="module" src="/src/main.js"></script>

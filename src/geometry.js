@@ -58,13 +58,16 @@ export function analyzeGeometry(M,options={}) {
  const truncated=parts.length>maxParts;
  const used=truncated?parts.slice(0,maxParts):parts;
  const collisions=[],near=[],singularities=[];
+ let minGap=Infinity,minPair=null;
  let totalPairs=0;
  const sharesJoint=(a,b)=>a.type==='bar'&&b.type==='bar'&&a.nodeIds.some(id=>b.nodeIds.includes(id));
  const mounted=(bar,wheel)=>bar.type==='bar'&&wheel.type==='wheel'&&bar.nodeIds.includes(wheel.nodeId);
  const attachedRack=(bar,rack)=>bar.type==='bar'&&rack.type==='rack'&&(bar.nodeIds.includes(rack.nodeId)||bar.nodeIds.some(id=>linkedRackNodes.has(`${rack.id}/${id}`)));
  const connectedWheel=(a,b)=>(M.mates||[]).find(m=>(m.a===a.id&&m.b===b.id)||(m.a===b.id&&m.b===a.id));
- function record(a,b,measure,radiusAdjust=0){if(collisions.length+near.length>=maxIssues)return;
+ function record(a,b,measure,radiusAdjust=0){
   const gap=measure.distance-a.r-b.r+radiusAdjust;
+  if(gap<minGap){minGap=gap;minPair={aId:a.id,bId:b.id,label:`${a.label} × ${b.label}`};}
+  if(collisions.length+near.length>=maxIssues)return;
   const pt=center(measure.a,measure.b);
   const item={id:`${a.id}/${b.id}`,label:`${a.label} × ${b.label}`,aId:a.id,bId:b.id,gap,at:pt,kind:gap<-.65?'collision':'near',description:gap<-.65?`Sobreposição geométrica aproximada de ${Math.abs(gap).toFixed(1)} mm.`:`Folga estimada de ${Math.max(0,gap).toFixed(1)} mm.`};
   if(gap<-.65)collisions.push(item);else if(gap<clearance&&gap>=-.65)near.push(item);
@@ -103,5 +106,7 @@ export function analyzeGeometry(M,options={}) {
   if(ratio>.96||ratio<.24){const at={x:s.x,y:s.y};if(finitePoint(at))singularities.push({id:`scissor/${s.id}`,label:`Pantógrafo ${s.id}: limite de abertura`,at,angle:null,description:'Relação altura/diagonal próxima de extremo geométrico; pode haver amplificação de esforços ou perda de movimento útil.'});}
  }
  collisions.sort((a,b)=>a.gap-b.gap);near.sort((a,b)=>a.gap-b.gap);
- return {collisions,near,singularities,partsInspected:used.length,totalParts:parts.length,pairsChecked:totalPairs,truncated,clearance,model:'2D',counts:{collisions:collisions.length,near:near.length,singularities:singularities.length}};
+ return {collisions,near,singularities,partsInspected:used.length,totalParts:parts.length,pairsChecked:totalPairs,truncated,clearance,minGap:Number.isFinite(minGap)?minGap:null,minPair,model:'2D',counts:{collisions:collisions.length,near:near.length,singularities:singularities.length}};
 }
+
+// KINÉTIKA V11 — menor folga entre pares.

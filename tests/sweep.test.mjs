@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {planMotionSweep,capturePose,summarizeMotionSweep,sampleSeverity} from '../src/sweep.js';
+const model=()=>({nodes:[],gears:[],bars:[],scissors:[]});
+const sample=(time,collisions=[],singularities=[],opts={})=>({time,valid:true,report:{collisions,singularities,near:[],minGap:opts.minGap??null,minPair:opts.minPair??null,truncated:false}});
+const collide=(id,gap=-4)=>({id,label:`Peças ${id}`,gap,description:'interferência'});
+const crit=id=>({id,label:`Junta ${id}`,description:'alinhamento'});
+test('sem motor e sem mecanismos varríveis informa bloqueio e não inventa curso',()=>{let p=planMotionSweep(model());assert.equal(p.ok,false);assert.match(p.reason,/Sem acionamento/)});
+test('motor de engrenagem determina ciclo conforme rpm',()=>{const m=model();m.gears=[{id:'g1',motor:{rpm:6}}];const p=planMotionSweep(m);assert.equal(p.ok,true);assert.equal(p.duration,10);assert.equal(p.steps,81)});
+test('mola varre aproximadamente 5,5 constantes de tempo',()=>{const m=model();m.bars=[{id:'b',motor:{type:'spring',tau:1.2}}];assert.ok(Math.abs(planMotionSweep(m).duration-6.6)<1e-9)});
+test('escolhas de tempo e amostragem são limitadas',()=>{const m=model();m.gears=[{id:'g',motor:{rpm:5}}];const p=planMotionSweep(m,{steps:400,duration:900,start:1});assert.equal(p.steps,201);assert.equal(p.duration,90);assert.equal(p.start,1)});
+test('captura somente graus de liberdade relevantes',()=>{const m=model();m.nodes=[{id:'a',x:1,y:2,fixed:true}];m.gears=[{id:'g',angle:.75}];m.scissors=[{id:'s',x:4,y:5,height:7,angle:25}];assert.deepEqual(capturePose(m),{nodes:[['a',1,2]],gears:[['g',.75]],scissors:[['s',4,5,7,25]]})});
+test('colisão contínua gera um intervalo com pico de penetração',()=>{const ss=[sample(0),sample(.1,[collide('a',-2)]),sample(.2,[collide('a',-5)]),sample(.3),sample(.4)];const o=summarizeMotionSweep(ss);assert.equal(o.collisionEvents,1);assert.equal(o.firstCollision,1);assert.equal(o.intervals[0].startTime,.1);assert.equal(o.intervals[0].endTime,.2);assert.equal(o.intervals[0].peakGap,-5)});
+test('colisões distintas separadas por uma posição limpa não se fundem',()=>{const ss=[sample(0,[collide('a')]),sample(.1),sample(.2,[collide('a')])];assert.equal(summarizeMotionSweep(ss).collisionEvents,2)});
+test('singularidade e colisão simultâneas permanecem eventos independentes',()=>{const ss=[sample(0,[collide('a')],[crit('j')]),sample(.5,[],[crit('j')]),sample(1)];const o=summarizeMotionSweep(ss);assert.equal(o.collisionEvents,1);assert.equal(o.singularityEvents,1);assert.equal(o.criticalSamples,2)});
+test('erro de resolução interrompe intervalo e não atesta folga',()=>{const ss=[sample(0,[collide('a')]),{time:1,valid:false,report:null},sample(2,[collide('a')])];const o=summarizeMotionSweep(ss);assert.equal(o.invalid,1);assert.equal(o.collisionEvents,2)});
+test('menor folga é obtida em todos os pares monitorados',()=>{const ss=[sample(0,[],[],{minGap:9,minPair:{label:'A'}}),sample(.5,[],[],{minGap:2.3,minPair:{label:'B'}}),sample(1,[],[],{minGap:5})];const o=summarizeMotionSweep(ss);assert.equal(o.minimumGap,2.3);assert.equal(o.minimumAt.index,1);assert.equal(o.minimumAt.pair.label,'B')});
+test('severidade visual prioriza colisão > singularidade > proximidade',()=>{assert.equal(sampleSeverity(sample(0,[collide('a')],[crit('b')])), 'collision');assert.equal(sampleSeverity(sample(0,[],[crit('j')])), 'singularity');assert.equal(sampleSeverity({valid:false}), 'invalid');assert.equal(sampleSeverity(sample(0)), 'clear')});
+
+test('sem motor uma roda recebe acionamento virtual sem alterar montagem',()=>{const m=model();m.gears=[{id:'g1',angle:0}];const p=planMotionSweep(m);assert.equal(p.ok,true);assert.deepEqual(p.virtualDrive,{kind:'gear',id:'g1',label:'Roda g1'});assert.equal(m.gears[0].motor,undefined)});
+test('sem engrenagem seleciona guia como acionamento virtual',()=>{const m=model();m.nodes=[{id:'n1',x:0,y:0,slider:{range:200}}];assert.equal(planMotionSweep(m).virtualDrive.kind,'node')});
+test('pantógrafo livre admite varredura virtual',()=>{const m=model();m.scissors=[{id:'s1'}];assert.equal(planMotionSweep(m).virtualDrive.kind,'scissor')});
