@@ -1,6 +1,15 @@
-# KINÉTIKA — Mechanical Atelier V11
+# KINÉTIKA — Mechanical Atelier V12
 
 Laboratório de mecanismos planos com engenharia cinemática interativa e interface responsiva. Barras, pivôs, apoios fixos, guias, engrenagens, cremalheiras, polias e pantógrafos podem ser adicionados à mesma montagem, reposicionados, rotacionados e conectados por juntas.
+
+## V12 · Juntas de todos os vértices e cotas de barras seguras
+
+- A ferramenta **J / Unir pontos** aceita **qualquer extremidade ou pivô central de um pantógrafo** como porta de conexão com outro pivô ou com as portas da cremalheira.
+- A união cria restrições persistentes entre os pontos; não funde os nós dos pantógrafos nem altera os ângulos escolhidos. O editor translada inicialmente o módulo não ancorado para coincidir pontos, preservando a direção no plano.
+- É possível ligar um vértice ao apoio fixo e outro à cremalheira para transmitir a mudança de abertura sob restrições geométricas. Conexões incompatíveis são recusadas; um único vértice conectado apenas define a posição, não define automaticamente uma única abertura.
+- As barras novas e importadas ficam em **🔒 Travada**, com comprimento que não muda durante o movimento. Use o botão **✎ Liberar para dimensionar** para ajustar temporariamente a dimensão. O botão **🔒 Fixar dimensão atual** registra a medida resultante e reativa a restrição rígida.
+- Ao ultrapassar uma configuração admissível, a simulação interrompe o movimento e restaura a última pose consistente para evitar representar uma barra rígida como se fosse de borracha.
+- Arquivos V11 são aceitos; o novo JSON inclui `nodeLinks` e `dimensionMode`. O núcleo matemático continua sendo apenas **cinemático 2D**, sem rigidez elástica, esforços ou resistência mecânica.
 
 ## V11 · Varredura de percurso e folga geométrica
 

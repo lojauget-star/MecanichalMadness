@@ -16,9 +16,10 @@ export function solveConstraints(M, options={}) {
  for(const g of gears)put(`${g.id}.angle`,g.angle);
  for(const s of scissors){put(`${s.id}.x`,s.x);put(`${s.id}.y`,s.y);put(`${s.id}.height`,s.height);put(`${s.id}.angle`,rad(s.angle))}
  const pins=options.pins||new Map();for(const [key,value] of pins instanceof Map?pins:Object.entries(pins)){if(lookup.has(key)){values[lookup.get(key)]=value;hard.add(key)}}
- // Alvos suaves: perseguir o cursor sem permitir distorção das restrições físicas.
+ // A meta de arraste é suave: preserva o espaço admissível de juntas e barras.
+ // Um destino fora do alcance NÃO se transforma numa restrição rígida impossível.
  const goals=options.goals instanceof Map?[...options.goals]:Object.entries(options.goals||{});
- const goalWeight=options.goalWeight??.045;
+ const goalWeight=options.goalWeight??0.045;
  const isGoal=goals.length>0;
  const free=keys.map((k,i)=>hard.has(k)?-1:i).filter(i=>i>=0);
  const maxVars=options.maxVariables??160;
@@ -36,7 +37,7 @@ export function solveConstraints(M, options={}) {
  const compile=x=>{
    const rows=[];
    function add(label,res,entries,scale=1){if(!finite(res))return;const gg=[];for(const [key,v] of entries){const index=lookup.get(key);if(index===undefined||!finite(v))continue;const j=reverse.get(index);if(j!==undefined&&Math.abs(v)>1e-12)gg.push([j,v*scale])}rows.push({label,r:res*scale,g:gg})}
-   for(const b of bars){if(!validNode(b.a)||!validNode(b.b))continue;const a=pos(x,b.a),c=pos(x,b.b),dx=c.x-a.x,dy=c.y-a.y,d=length(dx,dy),den=Math.max(d,1e-7),ux=dx/den,uy=dy/den;
+   for(const b of bars){if(b.dimensionMode==='draft'||!validNode(b.a)||!validNode(b.b))continue;const a=pos(x,b.a),c=pos(x,b.b),dx=c.x-a.x,dy=c.y-a.y,d=length(dx,dy),den=Math.max(d,1e-7),ux=dx/den,uy=dy/den;
      add(`Barra ${b.id}`,d-b.length,[[`${b.a}.x`,-ux],[`${b.a}.y`,-uy],[`${b.b}.x`,ux],[`${b.b}.y`,uy]])}
    for(const n of nodes){if(!n.slider)continue;const s=n.slider,p=pos(x,n.id),a=axe(s),dx=p.x-s.ox,dy=p.y-s.oy;
      add(`Guia ${n.id}`,dx*a.vx+dy*a.vy,[[`${n.id}.x`,a.vx],[`${n.id}.y`,a.vy]]);
@@ -59,6 +60,11 @@ export function solveConstraints(M, options={}) {
         add(`Tangência ${r.id}`,(p.x-c.x)*a.vx+(p.y-c.y)*a.vy-side*(g.radius+9),[[`${r.node}.x`,a.vx],[`${r.node}.y`,a.vy],[`${g.node}.x`,-a.vx],[`${g.node}.y`,-a.vy]])}
      }
    }
+   for(const l of M.nodeLinks||[]){
+      if(!validNode(l.a)||!validNode(l.b))continue;
+      add(`Junta universal ${l.id} x`,value(x,`${l.a}.x`)-value(x,`${l.b}.x`),[[`${l.a}.x`,1],[`${l.b}.x`,-1]]);
+      add(`Junta universal ${l.id} y`,value(x,`${l.a}.y`)-value(x,`${l.b}.y`),[[`${l.a}.y`,1],[`${l.b}.y`,-1]]);
+   }
    for(const l of M.pointLinks||[]){const r=rmap.get(l.rackId);if(!r||!validNode(l.nodeId)||!nmap.get(r.node)?.slider)continue;const p=pos(x,l.nodeId),t=rackPoint(x,r,l);
       add(`Junta ${l.id} x`,p.x-t.x,[[`${l.nodeId}.x`,1],[`${r.node}.x`,-1]]);
       add(`Junta ${l.id} y`,p.y-t.y,[[`${l.nodeId}.y`,1],[`${r.node}.y`,-1]])}
@@ -76,7 +82,7 @@ export function solveConstraints(M, options={}) {
       add(`Acionamento ${l.id}`,scVal(x,s.id,'height')-l.h0-rackQ(x,r)+l.q0,[[`${s.id}.height`,1],[`${r.node}.x`,-a.ux],[`${r.node}.y`,-a.uy]])}
    for(const [key,desired] of goals){
      if(!lookup.has(key)||hard.has(key)||!finite(desired))continue;
-     const weight=options.goalWeights?.[key]??goalWeight;
+     const weight=(options.goalWeights?.[key]??goalWeight);
      add(`Meta ${key}`,value(x,key)-desired,[[key,1]],weight);
      rows[rows.length-1].goal=true;
    }
@@ -88,8 +94,7 @@ export function solveConstraints(M, options={}) {
  for(let t=0;t<iters;t++){
    const rows=compile(x),max=Math.max(0,...rows.filter(r=>!r.goal).map(r=>Math.abs(r.r)));
    const goalError=Math.max(0,...rows.filter(r=>r.goal).map(r=>Math.abs(r.r)));
-   if(isGoal&&max<(options.tolerance??.015)&&goalError<goalWeight*(options.goalTolerance??.12)){converged=true;error=max;break}
-   if(!isGoal&&max<(options.tolerance??.015)){converged=true;error=max;break}
+   if(max<(options.tolerance??.015)&&(!isGoal||goalError<goalWeight*(options.goalTolerance??.12))){converged=true;error=max;break}
    if(!nfree){status='pinned';error=max;break}
    const lambda=options.damping??(isGoal?1e-7:.002),grad=new Float64Array(nfree),diag=new Float64Array(nfree).fill(lambda);
    for(const row of rows){for(const [j,v] of row.g){grad[j]-=v*row.r;diag[j]+=v*v}}

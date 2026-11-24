@@ -45,6 +45,7 @@ export function analyzeGeometry(M,options={}) {
  const gears=new Map((M.gears||[]).map(g=>[g.id,g]));
  const rackByNode=new Map((M.racks||[]).map(r=>[r.node,r]));
  const linkedRackNodes=new Set((M.pointLinks||[]).map(l=>`${l.rackId}/${l.nodeId}`));
+ const linkedNodePairs=new Set((M.nodeLinks||[]).flatMap(l=>[`${l.a}/${l.b}`,`${l.b}/${l.a}`]));
  const jointNodeIds=new Set();
  for(const s of M.scissors||[]){for(const id of [...(s.topIds||[]),...(s.bottomIds||[]),...(s.centerIds||[])])jointNodeIds.add(id)}
  const parts=[];
@@ -60,9 +61,9 @@ export function analyzeGeometry(M,options={}) {
  const collisions=[],near=[],singularities=[];
  let minGap=Infinity,minPair=null;
  let totalPairs=0;
- const sharesJoint=(a,b)=>a.type==='bar'&&b.type==='bar'&&a.nodeIds.some(id=>b.nodeIds.includes(id));
- const mounted=(bar,wheel)=>bar.type==='bar'&&wheel.type==='wheel'&&bar.nodeIds.includes(wheel.nodeId);
- const attachedRack=(bar,rack)=>bar.type==='bar'&&rack.type==='rack'&&(bar.nodeIds.includes(rack.nodeId)||bar.nodeIds.some(id=>linkedRackNodes.has(`${rack.id}/${id}`)));
+ const sharesJoint=(a,b)=>a.type==='bar'&&b.type==='bar'&&a.nodeIds.some(id=>b.nodeIds.some(other=>other===id||linkedNodePairs.has(`${id}/${other}`)));
+ const mounted=(bar,wheel)=>bar.type==='bar'&&wheel.type==='wheel'&&bar.nodeIds.some(id=>id===wheel.nodeId||linkedNodePairs.has(`${id}/${wheel.nodeId}`));
+ const attachedRack=(bar,rack)=>bar.type==='bar'&&rack.type==='rack'&&(bar.nodeIds.includes(rack.nodeId)||bar.nodeIds.some(id=>linkedRackNodes.has(`${rack.id}/${id}`)||[...linkedNodePairs].some(pair=>pair.startsWith(`${id}/`)&&linkedRackNodes.has(`${rack.id}/${pair.split('/')[1]}`))));
  const connectedWheel=(a,b)=>(M.mates||[]).find(m=>(m.a===a.id&&m.b===b.id)||(m.a===b.id&&m.b===a.id));
  function record(a,b,measure,radiusAdjust=0){
   const gap=measure.distance-a.r-b.r+radiusAdjust;
