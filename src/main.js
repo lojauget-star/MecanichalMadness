@@ -1,9 +1,10 @@
 
 'use strict';
-import {analyzeMechanism,solveConstraints} from './diagnostics.js';
-import {solveConstraints as solveInverseConstraints} from './solver.js';
+import {analyzeMechanism} from './diagnostics.js';
 import {ProjectHistory} from './history.js';
-// KINÉTIKA V9 | Arraste cinemático inverso com metas suaves e restrições prioritárias.
+import {solveConstraints} from './solver.js';
+import {analyzeGeometry} from './geometry.js';
+// KINÉTIKA V10 | Cinética inversa + análise de colisões e regiões singulares.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
 const TAU=Math.PI*2, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, RACK_CLEARANCE=9;
@@ -12,7 +13,9 @@ const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const dot=(a,b)=>a.x*b.x+a.y*b.y;
 const normDeg=d=>((d+180)%360+360)%360-180;
 let inverseDragInfo=null,inverseGhost=null;
-let lastSolveInfo={ok:true,maxResidual:0,iterations:0,constraints:0};
+let geometryReport=null, geometryLastCheck=0, geometryOverlayVisible=true;
+function inspectGeometry(force=false){const now=performance.now();if(force||!geometryReport||now-geometryLastCheck>80){geometryReport=analyzeGeometry(M);geometryLastCheck=now}return geometryReport}
+let lastSolveInfo={status:'initial',maxResidual:0,iterations:0};
 let M,sel=null,multi=[],tool='select',pending=null,pendingPort=null,hoverPort=null,drag=null,manualDrive=null,snapCandidate=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
 let cam={x:0,y:0,scale:1.5},view={x:-300,y:-220,w:600,h:440};
 const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],pinLinks:[],pointLinks:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
@@ -311,7 +314,7 @@ function makeMotor(kind,obj,mode='motor'){
   t=0;playing=false;updatePlay();solve();toast(mode==='spring'?'Abertura idealizada por mola configurada.':'Motor instalado. Ajuste a velocidade nas propriedades.');return true;
 }
 function setTool(next){pendingPort=null;hoverPort=null;inverseDragInfo=null;inverseGhost=null;if(['alignX','alignY'].includes(next)&&multi.length===2){useTwoSelection(next==='alignX'?'x':'y');next='select'}tool=next;pending=null;document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===next));$('modeBadge').innerHTML='FERRAMENTA <span>'+({select:'TESTAR',move:'MOVER CONJUNTO',rotate:'ROTACIONAR',joint:'UNIR PONTOS',node:'PIVÔ LIVRE',fixed:'APOIO FIXO',bar:'BARRA',slider:'GUIA LINEAR',gear:'ENGRENAGEM',pulley:'POLIA',rack:'CREMALHEIRA',mesh:'ENGRENAR',belt:'CORREIA',rackmesh:'PINHÃO + CREMALHEIRA',eccentric:'PINO EXCÊNTRICO',motor:'MOTOR',spring:'MOLA IDEALIZADA',alignX:'ALINHAR X',alignY:'ALINHAR Y',delete:'EXCLUIR'}[next]||next.toUpperCase())+'</span>';
-  const texts={joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>V9 · Arraste inverso:</strong> puxe um pivô, a extremidade de uma barra, uma cremalheira, o pinhão ou o acionamento do pantógrafo. As barras e guias permanecem rígidas e o alvo fica limitado pela geometria. Para reposicionar o conjunto use G.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
+  const texts={joint:'<strong>Juntas cinemáticas:</strong> toque em dois pontos de conexão. Cremalheiras oferecem início, centro, fim e âncora móvel; eixos e pivôs aparecem como círculos. Juntas incompatíveis são recusadas.',move:'<strong>Posicionar:</strong> arraste uma peça para mover o conjunto conectado sem alterar os comprimentos, o engrenamento ou o ângulo das engrenagens.',select:'<strong>V9 · Arraste inverso:</strong> puxe um pivô, a extremidade de uma barra, cremalheira, pinhão ou ponto de acionamento do pantógrafo. O sistema busca a posição válida mais próxima sem deformar as barras. Para reposicionar conjuntos, use G.',rotate:'<strong>Rotacionar:</strong> arraste uma cremalheira em torno do seu centro, uma barra em torno do pivô ou gire uma roda. Use Shift para ângulos de 15°.',node:'<strong>Pivô livre:</strong> clique na área para posicionar um novo ponto móvel.',fixed:'<strong>Apoio fixo:</strong> clique em um pivô para fixá-lo, ou no fundo para criar um.',bar:'<strong>Barra:</strong> clique em dois pivôs. Se clicar no fundo, um pivô novo será criado.',slider:'<strong>Guia linear:</strong> clique em um pivô (ou fundo). Ajuste o ângulo no inspetor.',gear:'<strong>Engrenagem:</strong> clique para criar uma roda com eixo fixo. Edite dentes e módulo.',pulley:'<strong>Polia:</strong> clique para posicionar uma polia. Ligue duas com «Correia».',rack:'<strong>Cremalheira:</strong> clique para inserir. Rotacione pelo círculo ⤾ ou com a ferramenta R.',mesh:'<strong>Engrenar:</strong> clique em duas engrenagens. A segunda é reposicionada se estiver isolada.',belt:'<strong>Correia:</strong> clique em duas polias/rodas. O giro será no mesmo sentido.',rackmesh:'<strong>Pinhão + cremalheira:</strong> clique na engrenagem e na cremalheira. Repita para conectar mais trilhos na mesma engrenagem.',eccentric:'<strong>Pino excêntrico:</strong> clique numa roda para criar ponto solidário à sua rotação.',motor:'<strong>Motor:</strong> clique numa roda, barra com apoio fixo ou pivô sobre guia.',spring:'<strong>Mola idealizada:</strong> clique em barra com apoio fixo, engrenagem ou cursor. A animação avança até uma posição-alvo; não calcula forças.',alignX:'<strong>Alinhar X:</strong> clique em dois pivôs para manter a mesma coordenada X.',alignY:'<strong>Alinhar Y:</strong> clique em dois pivôs para manter a mesma coordenada Y.',delete:'<strong>Excluir:</strong> clique em um componente para removê-lo.'};$('toolHint').innerHTML=texts[next];stage.classList.toggle('mode-select',next==='select');render();}
 function sizeView(){const w=Math.max(stage.clientWidth,100),h=Math.max(stage.clientHeight,100);view={w:w/cam.scale,h:h/cam.scale,x:cam.x-w/(2*cam.scale),y:cam.y-h/(2*cam.scale)};stage.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);return view}
 function ptOf(e){const r=stage.getBoundingClientRect();return {x:view.x+((e.clientX-r.left)/r.width)*view.w,y:view.y+((e.clientY-r.top)/r.height)*view.h}}
 function hitNode(p){let best=null,bestD=18/cam.scale;for(const n of M.nodes){let d=dist(p,n);if(d<bestD){best=n;bestD=d}}return best}
@@ -373,22 +376,24 @@ function solve(iter=200){
     const p=rackAnchorAt(r,offsetForRackPort(r,l.slot||'custom',l.offset||0));
     n.x=p.x;n.y=p.y;locks.set(n.id,{x:p.x,y:p.y});
   }
-  // Solução global V8: juntas, transmissões, guias, barras e pantógrafos
-  // são resolvidos por um único conjunto de equações com condições de contorno.
-  const pins=new Map();
-  for(const [id,p] of locks){pins.set(id+'.x',p.x);pins.set(id+'.y',p.y)}
-  for(const g of M.gears)pins.set(g.id+'.a',g.angle);
-  for(const g of M.scissors||[])for(const key of ['x','y','angle','height'])pins.set(g.id+'.'+key,g[key]);
-  lastSolveInfo=solveConstraints(M,{pins,iterations:Math.max(3,Math.min(12,Math.ceil(iter/24)+2)),strict:true,maxVariables:150});
+  // V8: todas as restrições geométricas participam do mesmo sistema de equações.
+  // Drives/apoios são condições de contorno rígidas. O restante é resolvido por
+  // mínimos quadrados amortecidos; o projetor V7 permanece como fallback seguro.
+  const pinned=new Map();
+  for(const [id,p] of locks){pinned.set(`${id}.x`,p.x);pinned.set(`${id}.y`,p.y)}
+  for(const g of M.gears)pinned.set(`${g.id}.angle`,g.angle); // transmissões motorizadas seguem a fase da V7
+  for(const g of M.scissors||[]){pinned.set(`${g.id}.x`,g.x);pinned.set(`${g.id}.y`,g.y);pinned.set(`${g.id}.height`,g.height);pinned.set(`${g.id}.angle`,rad(g.angle))}
+  const solved=solveConstraints(M,{pins:pinned,iterations:clamp(Math.ceil(iter/24)+2,3,12),tolerance:.02,acceptResidual:.50,maxVariables:160,strict:true});
+  lastSolveInfo=solved;
   const lenErr=b=>{const a=node(b.a),c=node(b.b);return Math.abs(dist(a,c)-b.length)};
-  if(!lastSolveInfo.ok){
-  for(let k=0;k<iter;k++){
-    // Links as rods with nonzero fixed lengths
-    for(const b of M.bars){let a=node(b.a),c=node(b.b),dx=c.x-a.x,dy=c.y-a.y,d=Math.hypot(dx,dy);if(d<1e-9){dx=1;dy=0;d=1}const er=(d-b.length)/d,wa=locks.has(a.id)?0:1,wc=locks.has(c.id)?0:1,sum=wa+wc;if(sum>0){a.x+=dx*er*wa/sum;a.y+=dy*er*wa/sum;c.x-=dx*er*wc/sum;c.y-=dy*er*wc/sum}}
-    for(const c of M.aligns){const a=node(c.a),b=node(c.b);if(!a||!b)continue;const ax=c.axis==='x'?'x':'y',v=(a[ax]-b[ax]),wa=locks.has(a.id)?0:1,wb=locks.has(b.id)?0:1,sum=wa+wb;if(sum>0){a[ax]-=v*wa/sum;b[ax]+=v*wb/sum}}
-    for(const n of M.nodes)if(n.slider&&!locks.has(n.id)){const s=n.slider,angle=rad(s.angle),u=Math.cos(angle),v=Math.sin(angle),d=(n.x-s.ox)*u+(n.y-s.oy)*v,q=clamp(d,-s.range/2,s.range/2);n.x=s.ox+q*u;n.y=s.oy+q*v}
-    for(const [id,p] of locks){const n=node(id);if(n){n.x=p.x;n.y=p.y}}
-  }
+  if(!solved.ok){
+    // Modelos antigos, cadeias incompatíveis ou muito grandes continuam editáveis.
+    for(let k=0;k<Math.min(iter,160);k++){
+      for(const b of M.bars){let a=node(b.a),c=node(b.b),dx=c.x-a.x,dy=c.y-a.y,d=Math.hypot(dx,dy);if(d<1e-9){dx=1;dy=0;d=1}const er=(d-b.length)/d,wa=locks.has(a.id)?0:1,wc=locks.has(c.id)?0:1,sum=wa+wc;if(sum>0){a.x+=dx*er*wa/sum;a.y+=dy*er*wa/sum;c.x-=dx*er*wc/sum;c.y-=dy*er*wc/sum}}
+      for(const c of M.aligns){const a=node(c.a),b=node(c.b);if(!a||!b)continue;const ax=c.axis==='x'?'x':'y',v=(a[ax]-b[ax]),wa=locks.has(a.id)?0:1,wb=locks.has(b.id)?0:1,sum=wa+wb;if(sum>0){a[ax]-=v*wa/sum;b[ax]+=v*wb/sum}}
+      for(const n of M.nodes)if(n.slider&&!locks.has(n.id)){const s=n.slider,angle=rad(s.angle),u=Math.cos(angle),v=Math.sin(angle),d=(n.x-s.ox)*u+(n.y-s.oy)*v,q=clamp(d,-s.range/2,s.range/2);n.x=s.ox+q*u;n.y=s.oy+q*v}
+      for(const [id,p] of locks){const n=node(id);if(n){n.x=p.x;n.y=p.y}}
+    }
   }
   maxResidual=0;for(const b of M.bars)maxResidual=Math.max(maxResidual,lenErr(b));for(const a of M.aligns){let na=node(a.a),nb=node(a.b);if(na&&nb)maxResidual=Math.max(maxResidual,Math.abs(na[a.axis]-nb[a.axis]))}
   for(const r of M.racks)if(r.gearId){const g=gear(r.gearId),rn=node(r.node);if(g&&rn){const {u,v}=rackAxes(r),c=node(g.node),d={x:rn.x-c.x,y:rn.y-c.y};maxResidual=Math.max(maxResidual,Math.abs(r.offset-(r.side||1)*g.radius*g.angle-dot({x:rn.x-rn.slider.ox,y:rn.y-rn.slider.oy},u)));maxResidual=Math.max(maxResidual,Math.abs(dot(d,v)-(r.side||1)*(g.radius+RACK_CLEARANCE)))}}
@@ -480,15 +485,26 @@ function sceneSVG(){
     }
   }
   if(snapCandidate){const a=snapCandidate.point;s+=`<circle cx="${a.x}" cy="${a.y}" r="${20/cam.scale}" fill="#9cf5b6" fill-opacity=".16" stroke="#b5ffde" stroke-width="2.5" stroke-dasharray="4 3" pointer-events="none"/><text x="${a.x+18/cam.scale}" y="${a.y-18/cam.scale}" fill="#ddffef" font-size="${12/cam.scale}" pointer-events="none">SOLTAR PARA CONECTAR</text>`;}
-  if(drag?.kind?.startsWith('ik')&&inverseGhost){
-    const r=inverseGhost,show=r.goal&&r.actual&&Math.hypot(r.goal.x-r.actual.x,r.goal.y-r.actual.y)>5;
-    if(show){s+=`<line x1="${r.actual.x}" y1="${r.actual.y}" x2="${r.goal.x}" y2="${r.goal.y}" stroke="#f4c57c" stroke-width="${1.5/cam.scale}" stroke-dasharray="${5/cam.scale} ${4/cam.scale}" opacity=".65" pointer-events="none"/><circle cx="${r.goal.x}" cy="${r.goal.y}" r="${10/cam.scale}" fill="none" stroke="#f5c782" stroke-width="${1.5/cam.scale}" stroke-dasharray="${3/cam.scale} ${3/cam.scale}" pointer-events="none"/>`;}
+  // Zonas de interferência e posições críticas. São marcadores de geometria 2D, não contato dinâmico.
+  if(geometryOverlayVisible&&geometryReport){
+    for(const hit of geometryReport.collisions.slice(0,25)){
+      const p=hit.at,rr=15/cam.scale;
+      s+=`<circle cx="${p.x}" cy="${p.y}" r="${rr*1.55}" fill="#fb6c69" fill-opacity=".14" stroke="#ff807b" stroke-width="${2/cam.scale}" stroke-dasharray="${4/cam.scale} ${3/cam.scale}" pointer-events="none"/><path d="M${p.x-rr/2},${p.y-rr/2}l${rr},${rr}m0,-${rr}l-${rr},${rr}" stroke="#ff9989" stroke-width="${2/cam.scale}" pointer-events="none"/>`;
+    }
+    for(const hit of geometryReport.singularities.slice(0,18)){
+      const p=hit.at,rr=17/cam.scale;
+      s+=`<circle cx="${p.x}" cy="${p.y}" r="${rr}" fill="#ffb85b" fill-opacity=".12" stroke="#ffcd7a" stroke-width="${1.8/cam.scale}" stroke-dasharray="${3/cam.scale} ${3/cam.scale}" pointer-events="none"/><text x="${p.x+rr}" y="${p.y-rr}" font-size="${12/cam.scale}" fill="#ffdb9f" pointer-events="none">△</text>`;
+    }
   }
-  if(multi.length){for(const item of multi){const pos=entityPosition(item);if(pos)s+=`<circle cx="${pos.x}" cy="${pos.y}" r="${20/cam.scale+4}" stroke="#f7bf76" stroke-width="2.5" fill="none" pointer-events="none"/>`}}
+  if(drag?.kind?.startsWith('ik')&&inverseGhost){
+   const r=inverseGhost,show=r.goal&&r.actual&&Math.hypot(r.goal.x-r.actual.x,r.goal.y-r.actual.y)>5;
+   if(show){s+=`<line x1="${r.actual.x}" y1="${r.actual.y}" x2="${r.goal.x}" y2="${r.goal.y}" stroke="#f4c57c" stroke-width="${1.5/cam.scale}" stroke-dasharray="${5/cam.scale} ${4/cam.scale}" opacity=".65" pointer-events="none"/><circle cx="${r.goal.x}" cy="${r.goal.y}" r="${10/cam.scale}" fill="none" stroke="#f5c782" stroke-width="${1.5/cam.scale}" stroke-dasharray="${3/cam.scale} ${3/cam.scale}" pointer-events="none"/>`;}
+ }
+ if(multi.length){for(const item of multi){const pos=entityPosition(item);if(pos)s+=`<circle cx="${pos.x}" cy="${pos.y}" r="${20/cam.scale+4}" stroke="#f7bf76" stroke-width="2.5" fill="none" pointer-events="none"/>`}}
   if(pending){const first=pending.id,kind=pending.kind;let p0=kind==='object'?entityPosition(pending):kind==='gear'?node(gear(first)?.node):kind==='rack'?node(rack(first)?.node):node(first);if(p0){s+=`<line x1="${p0.x}" y1="${p0.y}" x2="${pointer.x}" y2="${pointer.y}" stroke="#f6c17f" stroke-width="2" stroke-dasharray="8 5" pointer-events="none"/><circle cx="${p0.x}" cy="${p0.y}" r="13" fill="none" stroke="#f6c17f" stroke-width="2" pointer-events="none"/>`}}
   return s;
 }
-function render(){stage.innerHTML=sceneSVG();const badge=$('solverBadge');if(badge){const ok=lastSolveInfo.ok&&maxResidual<.55;badge.textContent=ok?'◇ SOLUCIONADOR · OK':'◇ RESTRIÇÕES · VERIFICAR';badge.classList.toggle('solver-warning',!ok);badge.title='V9: cinemática inversa; erro estrutural '+fmt(maxResidual,2)+' mm';if(drag?.kind?.startsWith('ik')&&inverseDragInfo){badge.textContent=inverseDragInfo.blocked?'◇ MOVIMENTO BLOQUEADO':inverseDragInfo.limitReached?'◇ LIMITE CINEMÁTICO':'◇ ARRASTE INVERSO · OK';badge.classList.toggle('solver-warning',inverseDragInfo.blocked);}}if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
+function render(){inspectGeometry();stage.innerHTML=sceneSVG();const safetyBadge=$('geometryBadge');if(safetyBadge){const d=geometryReport;safetyBadge.textContent=d.collisions.length?'⚠ '+d.collisions.length+' INTERFERÊNCIA(S)':d.singularities.length?'△ '+d.singularities.length+' POSIÇÃO(ÕES) CRÍTICA(S)':'◇ SEM INTERFERÊNCIA DETECTADA';safetyBadge.classList.toggle('geometry-danger',d.collisions.length>0);safetyBadge.classList.toggle('geometry-caution',!d.collisions.length&&d.singularities.length>0);safetyBadge.title='Análise 2D aproximada; abra Geometria para detalhes.';}const solverBadge=$('solverBadge');if(solverBadge){const ok=lastSolveInfo.ok&&maxResidual<.55;solverBadge.textContent=ok?'◇ SOLUCIONADOR · OK':'◇ RESTRIÇÕES · VERIFICAR';solverBadge.classList.toggle('solver-warning',!ok);solverBadge.title='V9: restrições globais prioritárias; arraste inverso por meta suave. Erro máximo: '+fmt(maxResidual,2)+' mm';if(drag?.kind?.startsWith('ik')&&inverseDragInfo){solverBadge.textContent=inverseDragInfo.blocked?'◇ MOVIMENTO BLOQUEADO':inverseDragInfo.limitReached?'◇ LIMITE DE CURSO':'◇ ARRASTE INVERSO · OK';solverBadge.classList.toggle('solver-warning',inverseDragInfo.blocked);}}if($('numJoints'))$('numJoints').textContent=jointCount();if($('jointBadge'))$('jointBadge').textContent=pendingPort?'SEGUNDO PONTO':'◉ '+jointCount()+' JUNTA(S)';$('numNodes').textContent=M.nodes.length;$('numBars').textContent=M.bars.length;$('numGears').textContent=M.gears.length;$('residual').textContent=fmt(maxResidual,1)+' mm';$('residual').style.color=maxResidual>1?'#f58b85':'#cceae1'}
 function select(type,id,keepMulti=false){sel=type?{type,id}:null;if(!keepMulti)multi=[];renderProperties();render()}
 function optRow(label,id,val,step='1',kind='number',min=''){return `<label class="field"><span>${label}</span><input data-prop="${id}" type="${kind}" ${kind==='number'?`step="${step}"`:''} ${min!==''?`min="${min}"`:''} value="${str(val)}"></label>`}
 function checkRow(label,id,value){return `<label class="field"><span>${label}</span><input type="checkbox" data-prop="${id}" ${value?'checked':''}></label>`}
@@ -678,7 +694,7 @@ function onDown(e){
  }else if(picked.type==='node'){
    const n=node(picked.id),join=pointLinkOfNode(n.id);select('node',n.id);
    if(tool==='move'){drag={kind:'assemblyMove',target:{type:'node',id:n.id},start:p,previous:p}}
-   else if(n.fixed){toast('Este é um apoio fixo. Use Mover (G) para reposicionar a montagem.',true);}
+   else if(n.fixed){toast('Apoio fixo. Use Mover (G) para reposicionar o conjunto ou desative o apoio para testá-lo.',true);}
    else drag={kind:'ikNode',id:n.id,start:p,origin:{x:n.x,y:n.y}};
  }
  if(drag){stage.setPointerCapture(e.pointerId);stage.classList.add('dragging')}
@@ -716,21 +732,27 @@ function finishManual(){
   solve(145);
   render();
 }
-// V9: arraste inverso — o cursor é um alvo suave, nunca um apoio rígido.
+// V9: resolver uma cadeia puxando QUALQUER pivô, e não apenas pelo elemento motor.
+// Metas suaves deixam a posição fora do alcance sobre o limite admissível do mecanismo.
 function runInverseGoal(request){
  const goals=new Map(),fixed=new Map();
  if(request.kind==='gear')goals.set(`${request.id}.angle`,request.angle);
  else{goals.set(`${request.id}.x`,request.x);goals.set(`${request.id}.y`,request.y)}
+ // Ao arrastar o acionamento do pantógrafo isolado, manter orientação e base.
+ // A abertura permanece variável; para grupos conectados, o acoplamento a outras
+ // estruturas determina a posição pela equação de coincidência.
  if(request.scissorId){const g=scissor(request.scissorId);
    if(g&&!scissorLink(g.id)){
      fixed.set(`${g.id}.x`,g.x);fixed.set(`${g.id}.y`,g.y);fixed.set(`${g.id}.angle`,rad(g.angle));
    }
  }
  const backup=JSON.stringify(M);
- let result=solveInverseConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.25:.038,iterations:24,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-8});
+ let result=solveConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.25:.038,iterations:24,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-8});
  if(!result.ok){
+   // Em limites muito exigentes, o cursor continua livre mas o conjunto não deforma.
+   // Uma segunda tentativa mais suave busca a configuração admissível mais próxima.
    Object.assign(M,JSON.parse(backup));
-   result=solveInverseConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.07:.008,iterations:28,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-9});
+   result=solveConstraints(M,{pins:fixed,goals,goalWeight:request.kind==='gear'?.07:.008,iterations:28,maxVariables:210,goalTolerance:.45,acceptResidual:.22,strict:true,damping:1e-9});
  }
  if(!result.ok){Object.assign(M,JSON.parse(backup));inverseDragInfo={...result,blocked:true};}
  else inverseDragInfo={...result,blocked:false};
@@ -745,7 +767,8 @@ function onMove(e){
  $('coordBadge').textContent='X '+fmt(p.x,0)+' · Y '+fmt(p.y,0)+' mm';
  if(!drag){if(tool==='joint'){const next=closestPort(p,22/cam.scale,pendingPort);if((hoverPort?portId(hoverPort):null)!==(next?portId(next):null)){hoverPort=next;render()}}else if(pending)render();return}
  if(drag.kind==='ikNode'){
-   runInverseGoal({kind:'node',id:drag.id,x:drag.origin.x+p.x-drag.start.x,y:drag.origin.y+p.y-drag.start.y,scissorId:drag.scissorId});
+   const goal={x:drag.origin.x+p.x-drag.start.x,y:drag.origin.y+p.y-drag.start.y};
+   runInverseGoal({kind:'node',id:drag.id,x:goal.x,y:goal.y,scissorId:drag.scissorId});
  }else if(drag.kind==='ikGear'){
    const g=gear(drag.id),center=node(g.node),a=Math.atan2(p.y-center.y,p.x-center.x);
    let delta=a-drag.lastAngle;if(delta>Math.PI)delta-=TAU;if(delta< -Math.PI)delta+=TAU;
@@ -900,21 +923,68 @@ function loadJSON(input){let a=input?.project||input;if(!a||!Array.isArray(a.nod
   pendingPort=null;hoverPort=null;
   t=0;playing=false;sel=null;multi=[];pending=null;manualDrive=null;updatePlay();$('projectTitle').textContent=M.name;solve();renderProperties();fit();setTool('select');toast('Projeto importado com sucesso.');
 }
-
+// V7 · diagnostics (on demand) and versioned local history.
 const history=new ProjectHistory(80), AUTOSAVE_KEY='kinetika.mechanical-atelier.v7';
-let saveTimer=null;
-function historyUI(){$('undoBtn').disabled=!history.canUndo;$('redoBtn').disabled=!history.canRedo}
-function checkpoint(){if(history.capture(M)){historyUI();clearTimeout(saveTimer);const b=$('saveBadge');if(b)b.textContent='○ ALTERAÇÕES LOCAIS';saveTimer=setTimeout(()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()));if(b)b.textContent='● SALVO LOCALMENTE'}catch{}},550)}}
-function restoreHistory(m){if(!m)return;playing=false;manualDrive=null;loadJSON({version:7,project:m});historyUI();clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()))}catch{}},550)}
-function undoProject(){restoreHistory(history.undo());toast('Ação desfeita.')}
-function redoProject(){restoreHistory(history.redo());toast('Ação refeita.')}
-function showDiagnostics(){solve(180);const a=analyzeMechanism(M),status={móvel:'Montagem móvel',travado:'Montagem travada',incompatível:'Montagem incompatível',parcial:'Análise parcial'}[a.status]||'Montagem vazia';const info=(label,value,sub)=>'<div class="diag-metric"><span>'+label+'</span><strong>'+str(value??'—')+'</strong><span>'+sub+'</span></div>';const items=a.issues.map(v=>'<div class="diag-issue '+str(v.severity)+'"><strong>'+str(v.label)+'</strong><p>'+str(v.explanation)+'</p></div>').join('')||'<div class="diag-issue"><strong>Nenhuma inconsistência detectada.</strong><p>A ausência de resíduos não prova resistência ou ausência de colisões.</p></div>';$('diagnoseResults').innerHTML='<div class="diag-status '+(a.status==='incompatível'?'error':'')+'">◉ '+status+'</div><div class="diag-metrics">'+info('Mobilidade estimada',a.mobility,'graus de liberdade no plano')+info('Equações',a.constraints,'restrições consideradas')+info('Posto',a.rank,'posto numérico')+info('Dependentes',a.redundant,'possíveis redundâncias')+'</div><div class="diag-issues">'+items+'</div><div class="diag-caveat">Estimativa local na geometria atual. Movimentos globais de montagens sem apoios contam como liberdade. Não calcula forças, torque, atrito, colisões, flexão nem resistência estrutural.</div>';$('diagnoseModal').classList.add('show')}
-$('undoBtn').onclick=undoProject;$('redoBtn').onclick=redoProject;$('diagnoseBtn').onclick=showDiagnostics;$('diagnoseRefresh').onclick=showDiagnostics;
-stage.addEventListener('pointerup',()=>queueMicrotask(checkpoint));
-stage.addEventListener('pointercancel',()=>queueMicrotask(checkpoint));
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(b&&!['undoBtn','redoBtn','diagnoseBtn','diagnoseRefresh'].includes(b.id))queueMicrotask(checkpoint)});
-document.addEventListener('change',e=>{if(e.target.matches('input,select'))queueMicrotask(checkpoint)});
-document.addEventListener('pointerup',e=>{if(e.target.closest('input[type=range]'))queueMicrotask(checkpoint)});
+let autosaveTimer=null;
+function updateHistoryUI(){
+  $('undoBtn').disabled=!history.canUndo;$('redoBtn').disabled=!history.canRedo;
+}
+function scheduleAutosave(){
+  if(autosaveTimer)clearTimeout(autosaveTimer);
+  const badge=$('saveBadge');if(badge)badge.textContent='○ ALTERAÇÕES LOCAIS';
+  autosaveTimer=setTimeout(()=>{
+    try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()));if(badge)badge.textContent='● SALVO LOCALMENTE'}
+    catch(err){if(badge)badge.textContent='! NÃO FOI POSSÍVEL SALVAR'}
+  },550);
+}
+function commitChange(){
+  if(!M)return;
+  if(history.capture(M)){scheduleAutosave();updateHistoryUI()}
+}
+function restoreHistoryModel(next){
+  if(!next)return;
+  playing=false;manualDrive=null;drag=null;snapCandidate=null;pending=null;pendingPort=null;
+  // Restoring a project uses the same legacy migrator as JSON import.
+  loadJSON({version:7,project:next});
+  updateHistoryUI();scheduleAutosave();
+}
+function undoProject(){if(!history.canUndo){toast('Nada para desfazer.');return}restoreHistoryModel(history.undo());toast('Ação desfeita.')}
+function redoProject(){if(!history.canRedo){toast('Nada para refazer.');return}restoreHistoryModel(history.redo());toast('Ação refeita.')}
+function showDiagnostics(){
+  solve(180);
+  const report=analyzeMechanism(M);
+  const status=report.status==='móvel'?'Montagem móvel':report.status==='travado'?'Montagem travada':report.status==='incompatível'?'Montagem incompatível':report.status==='vazio'?'Sem componentes':'Análise parcial';
+  const statusClass=report.status==='incompatível'?'error':report.status==='travado'?'locked':'';
+  const metric=(label,value,note)=>`<div class="diag-metric"><span>${label}</span><strong>${str(value)}</strong><span>${note}</span></div>`;
+  const issues=report.issues.length?report.issues.map(x=>`<div class="diag-issue ${x.severity}"><strong>${x.severity==='error'?'●':x.severity==='warning'?'◐':'○'} ${str(x.label)}</strong><p>${str(x.explanation)}</p></div>`).join(''):'<div class="diag-issue"><strong>Nenhum erro identificado nas restrições examinadas.</strong><p>Isso não garante resistência estrutural ou ausência de interferências.</p></div>';
+  $('diagnoseResults').innerHTML=`<div class="diag-status ${statusClass}">◉ ${status}</div><div class="diag-metrics">${metric('Mobilidade estimada',report.mobility??'—','graus de liberdade do sistema 2D')}${metric('Restrições',report.constraints,'equações consideradas')}${metric('Posto',report.rank??'—','posto numérico do jacobiano')}${metric('Redundâncias',report.redundant??'—','restrições dependentes')}</div><div class="diag-v8-summary">◇ Solucionador V8: <strong>${str(lastSolveInfo.ok?'Convergência / posição admissível':'Verificação necessária')}</strong> · ${str(lastSolveInfo.constraints??'—')} equações · ${str(lastSolveInfo.iterations??'—')} iterações · erro do núcleo ${fmt(lastSolveInfo.maxResidual??0,2)} mm. ${lastSolveInfo.status==='too-large'?'Montagem maior que o limite de cálculo: aplicado modo de compatibilidade.':''}</div><div class="diag-issues">${issues}</div><div class="diag-caveat">A contagem inclui movimentos globais de montagens sem apoio fixo. É um diagnóstico local na posição atual, não uma prova de mobilidade global. Em singularidades o posto pode mudar; colisões, folgas, atrito, resistência e forças não são avaliados.</div>`;
+  $('diagnoseModal').classList.add('show');
+}
+$('diagnoseBtn').onclick=showDiagnostics;$('diagnoseRefresh').onclick=showDiagnostics;
+function showGeometry(){
+  const d=inspectGeometry(true),metric=(v,label)=>`<div class="geometry-metric"><strong>${v}</strong><small>${label}</small></div>`;
+  const row=(item,tone)=>`<div class="geometry-row ${tone}"><div class="geometry-row-head"><span>${tone==='collision'?'●':tone==='singularity'?'△':'◇'} ${str(item.label)}</span><small>${tone==='collision'?'INTERFERÊNCIA':tone==='singularity'?'POSSÍVEL SINGULARIDADE':'PROXIMIDADE'}</small></div><p>${str(item.description)}</p></div>`;
+  const details=[...d.collisions.map(x=>row(x,'collision')),...d.singularities.map(x=>row(x,'singularity')),...d.near.map(x=>row(x,'near'))].slice(0,32).join('');
+  $('geometryResults').innerHTML=`<div class="geometry-metrics">${metric(d.collisions.length,'Interferências')}${metric(d.singularities.length,'Posições críticas')}${metric(d.near.length,'Proximidades')}</div><div class="geometry-info">${d.partsInspected} elementos · ${d.pairsChecked} pares examinados · folga mínima configurada ${fmt(d.clearance,0)} mm${d.truncated?' · análise parcial por limite de elementos':''}.</div>${details||'<div class="geometry-empty">Nenhuma interferência ou singularidade geométrica indicada nesta configuração.</div>'}<p class="geometry-disclaimer">Os perfis são aproximados: barras ≈ 10 mm de espessura, cremalheiras ≈ 18 mm, rodas pelo raio primitivo. Juntas compartilhadas e engrenamentos declarados são tratados como contatos intencionais. O alerta de alinhamento colinear é um indício de ponto morto potencial, não prova de travamento. Não detecta colisões em planos 3D diferentes, folgas reais, perfil involuta, torque ou forças.</p>`;
+  $('geometryOverlayToggle').checked=geometryOverlayVisible;
+  $('geometryModal').classList.add('show');
+}
+$('geometryBtn').onclick=showGeometry;
+$('geometryRefresh').onclick=showGeometry;
+$('geometryOverlayToggle').onchange=e=>{geometryOverlayVisible=e.target.checked;render()};
+$('geometryBadge').onclick=showGeometry;
+
+$('undoBtn').onclick=undoProject;$('redoBtn').onclick=redoProject;
+// Complete a gesture as one history step, even when it comprises many pointermove updates.
+stage.addEventListener('pointerup',()=>queueMicrotask(commitChange));
+stage.addEventListener('pointercancel',()=>queueMicrotask(commitChange));
+// Tool buttons, actions, presets and inspector events share a single history boundary.
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button');
+  if(b&&!['undoBtn','redoBtn','diagnoseBtn','diagnoseRefresh'].includes(b.id))queueMicrotask(commitChange);
+});
+document.addEventListener('change',e=>{if(e.target.matches('input, select'))queueMicrotask(commitChange)});
+document.addEventListener('pointerup',e=>{if(e.target.closest('input[type=range]'))queueMicrotask(commitChange)});
 window.addEventListener('beforeunload',()=>{try{localStorage.setItem(AUTOSAVE_KEY,JSON.stringify(serialize()))}catch{}});
 
 $('palette').addEventListener('click',e=>{const b=e.target.closest('[data-tool]');if(b)setTool(b.dataset.tool)});
@@ -922,7 +992,7 @@ $('newPreset').onclick=()=>$('examplesModal').classList.add('show');
 $('newBlank').onclick=()=>{goPreset('blank');toast('Área de trabalho limpa. Comece pelos apoios.')};
 $('exportBtn').onclick=exportJSON;$('svgBtn').onclick=exportSVG;
 $('importBtn').onclick=()=>$('fileInput').click();
-$('fileInput').addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{loadJSON(JSON.parse(await f.text()));checkpoint()}catch(err){toast('Falha ao importar: '+err.message,true)}e.target.value=''});
+$('fileInput').addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{loadJSON(JSON.parse(await f.text()));commitChange()}catch(err){toast('Falha ao importar: '+err.message,true)}e.target.value=''});
 $('helpBtn').onclick=()=>$('helpModal').classList.add('show');
 $('scissorBuilderBtn').onclick=()=>$('scissorModal').classList.add('show');
 $('buildScissor').onclick=()=>createScissor($('scissorStages').value,$('scissorWidth').value,$('scissorHeight').value,false);
@@ -939,6 +1009,9 @@ $('properties').addEventListener('input',e=>{const anchor=e.target.closest('[dat
   const slider=e.target.closest('[data-rack-slider]');if(!slider)return;playing=false;updatePlay();manualRackPosition(rack(slider.dataset.rackSlider),Number(slider.value),true)});
 $('properties').addEventListener('change',e=>{let p=e.target.closest('[data-prop]');if(p)applyProperty(p.dataset.prop,p.value,p.checked)});
 $('properties').addEventListener('click',e=>{let act=e.target.closest('[data-act]');if(!act)return;if(act.dataset.act==='fit')fit();if(act.dataset.act==='detachPoint'){removePointLink(act.dataset.linkId)}if(['anchorStart','anchorCenter','anchorEnd'].includes(act.dataset.act)&&sel?.type==='rack'){const r=rack(sel.id);const pos=act.dataset.act==='anchorStart'?-r.length/2+6:act.dataset.act==='anchorEnd'?r.length/2-6:0;setRackAnchor(r,pos);solve(120);renderProperties();render();}if(act.dataset.act==='unlinkPin'){const l=sel?.type==='rack'?rackLink(sel.id):sel?.type==='scissor'?scissorLink(sel.id):null;if(l){detachPinLink(l.id);solve(100);renderProperties();render();}}if(act.dataset.act==='alignSelectionX')useTwoSelection('x');if(act.dataset.act==='alignSelectionY')useTwoSelection('y');if(act.dataset.act==='delete'&&sel)deleteItem(sel.type,sel.id);if(act.dataset.act==='disconnectRack'&&sel?.type==='rack'){disconnectRack(rack(sel.id));solve();renderProperties();render();toast('Cremalheira desconectada; permanece orientável.')}if(act.dataset.act==='stopMotor'){M.gears.forEach(g=>g.baseAngle=g.angle);removeMotors();playing=false;t=0;updatePlay();solve();render();renderProperties();toast('Acionamento removido.')}if(['motor','spring'].includes(act.dataset.act)&&sel){let obj=sel.type==='node'?node(sel.id):sel.type==='bar'?bar(sel.id):gear(sel.id);if(obj&&makeMotor(sel.type,obj,act.dataset.act))renderProperties()}if(act.dataset.act==='eccentric'&&sel?.type==='gear'){let nn=addFollower(gear(sel.id));select('node',nn.id);solve()}});
-window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoProject();else undoProject();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoProject();return}if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel){deleteItem(sel.type,sel.id);checkpoint()}}const keys={j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
+window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoProject();else undoProject();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoProject();return}if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(document.querySelector('.modal-back.show')){if(e.key==='Escape')document.querySelectorAll('.modal-back').forEach(m=>m.classList.remove('show'));return}if(e.key==='Escape'){pending=null;pendingPort=null;setTool('select')}if(e.key===' '){e.preventDefault();$('playBtn').click()}if(e.key==='Delete'||e.key==='Backspace'){if(sel){deleteItem(sel.type,sel.id);commitChange()}}const keys={j:'joint',v:'select',g:'move',r:'rotate',p:'node',f:'fixed',b:'bar',s:'slider',m:'motor'};if(keys[e.key.toLowerCase()])setTool(keys[e.key.toLowerCase()])});
 let previous=0;function tick(ms){if(!previous)previous=ms;const dt=clamp((ms-previous)/1000,0,.05);previous=ms;if(playing){t+=dt*speed;solve();render();updateTime()}requestAnimationFrame(tick)}
-new ResizeObserver(()=>render()).observe(stage);goPreset('rackdual');select('rack',M.racks[1].id);try{const raw=localStorage.getItem(AUTOSAVE_KEY);if(raw){loadJSON(JSON.parse(raw));toast('Projeto recuperado do navegador.')}}catch(e){console.warn('Autosave não pôde ser recuperado',e)}history.seed(M);historyUI();requestAnimationFrame(tick);
+new ResizeObserver(()=>render()).observe(stage);
+goPreset('rackdual');select('rack',M.racks[1].id);
+try{const raw=localStorage.getItem(AUTOSAVE_KEY);if(raw){const saved=JSON.parse(raw);loadJSON(saved);toast('Projeto anterior recuperado do navegador.')}}catch(err){console.warn('Autosave não carregado:',err)}
+history.seed(M);updateHistoryUI();requestAnimationFrame(tick);

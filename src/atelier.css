@@ -187,3 +187,28 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important}
 #solverBadge{background:rgba(199,235,220,.92);border-color:#80bda7;color:#215b4b;font-weight:750}
 #solverBadge.solver-warning{background:rgba(252,230,206,.95);border-color:#c9a77a;color:#80551e}
 @media(max-width:780px){#solverBadge{font-size:9px;padding:5px 7px}}
+
+/* V10 · Inspeção geométrica. */
+.geometry-badge{cursor:pointer;font:inherit;border:1px solid #527b78;background:#23443c;color:#bce9d5}
+.geometry-badge:hover{background:#31564e}
+.geometry-badge.geometry-danger{background:#6a3230;color:#ffd4cf;border-color:#b8675f}
+.geometry-badge.geometry-caution{background:#57422b;color:#ffe0a3;border-color:#a2824d}
+.geometry-modal{max-width:720px;max-height:min(86dvh,780px);overflow:auto}
+.geometry-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px}
+.geometry-metric{border:1px solid #dfe3dc;border-radius:12px;padding:16px;background:#f2f4ee;display:flex;flex-direction:column;gap:4px}
+.geometry-metric strong{font-size:25px;letter-spacing:-.035em;color:#2e4944}
+.geometry-metric small{font-size:10px;color:#75847b}
+.geometry-info{margin:12px 2px 16px;color:#74847b;font-size:11px;line-height:1.6}
+.geometry-row{background:#fff;border:1px solid #e1e5dd;border-left:3px solid #8fa79c;border-radius:11px;padding:12px 14px;margin-top:8px}
+.geometry-row.collision{border-left-color:#c76861;background:#fff9f7}
+.geometry-row.singularity{border-left-color:#d5a354;background:#fffaf1}
+.geometry-row.near{border-left-color:#87a6a4}
+.geometry-row-head{display:flex;gap:12px;align-items:center;justify-content:space-between;font-size:12px;font-weight:750;color:#364b46}
+.geometry-row-head small{font-size:8px;letter-spacing:.1em;color:#87968a;white-space:nowrap}
+.geometry-row p,.geometry-disclaimer{font-size:11px;line-height:1.65;color:#7b8b82;margin:7px 0 0}
+.geometry-empty{padding:22px 16px;color:#587767;background:#eff4ee;border:1px solid #d7e4d6;border-radius:12px;font-size:12px}
+.geometry-disclaimer{margin:16px 0 0!important}
+.geometry-actions{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:20px}
+.geometry-toggle{display:flex;gap:9px;align-items:center;font-size:12px;color:#526c60}
+.geometry-toggle input{accent-color:#3b8b78}
+@media(max-width:700px){.geometry-badge{display:none}.geometry-metrics{gap:6px}.geometry-metric{padding:12px 9px}.geometry-metric strong{font-size:19px}.geometry-row-head{align-items:flex-start;flex-direction:column;gap:3px}}

@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {analyzeGeometry,segmentSeparation} from '../src/geometry.js';
+const pt=(id,x,y,ext={})=>({id,x,y,...ext});
+const M=()=>({nodes:[],bars:[],gears:[],racks:[],mates:[],pointLinks:[],scissors:[]});
+test('cruzamento de segmentos',()=>{const r=segmentSeparation({x:0,y:0},{x:80,y:80},{x:0,y:80},{x:80,y:0});assert.equal(r.distance,0)});
+test('barras cruzadas sem junta são interferência',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',100,100),pt('c',0,100),pt('d',100,0)];m.bars=[{id:'b1',a:'a',b:'b'},{id:'b2',a:'c',b:'d'}];assert.equal(analyzeGeometry(m).collisions.length,1)});
+test('pivô comum é contato funcional',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',80,0),pt('c',80,80)];m.bars=[{id:'a1',a:'a',b:'b'},{id:'a2',a:'b',b:'c'}];assert.equal(analyzeGeometry(m).collisions.length,0)});
+test('roda montada no pivô da barra não sinaliza colisão',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',90,0)];m.bars=[{id:'bar',a:'a',b:'b'}];m.gears=[{id:'g',node:'a',radius:25}];assert.equal(analyzeGeometry(m).collisions.length,0)});
+test('rodas sobrepostas não ligadas são detectadas',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',25,0)];m.gears=[{id:'g1',node:'a',radius:20},{id:'g2',node:'b',radius:20}];assert.equal(analyzeGeometry(m).collisions.length,1)});
+test('engrenamento correto não é colisão',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',40,0)];m.gears=[{id:'g1',node:'a',radius:20,module:3},{id:'g2',node:'b',radius:20,module:3}];m.mates=[{id:'m',type:'gear',a:'g1',b:'g2'}];assert.equal(analyzeGeometry(m).collisions.length,0)});
+test('engrenamento gravemente sobreposto é detectado',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',10,0)];m.gears=[{id:'g1',node:'a',radius:20,module:3},{id:'g2',node:'b',radius:20,module:3}];m.mates=[{id:'m',type:'gear',a:'g1',b:'g2'}];assert.equal(analyzeGeometry(m).collisions.length,1)});
+test('pinhão e cremalheira vinculados não são colisão',()=>{const m=M();m.nodes=[pt('a',0,0),pt('b',0,29,{slider:{angle:0,ox:0,oy:29,range:150}})];m.gears=[{id:'g',node:'a',radius:20}];m.racks=[{id:'r',node:'b',length:110,gearId:'g'}];assert.equal(analyzeGeometry(m).collisions.length,0)});
+test('barras colineares indicam posição crítica',()=>{const m=M();m.nodes=[pt('a',-100,0),pt('b',0,0),pt('c',100,0)];m.bars=[{id:'ab',a:'a',b:'b'},{id:'bc',a:'b',b:'c'}];assert.equal(analyzeGeometry(m).singularities.length,1)});
+test('barras perpendiculares não indicam posição crítica',()=>{const m=M();m.nodes=[pt('a',-100,0),pt('b',0,0),pt('c',0,100)];m.bars=[{id:'ab',a:'a',b:'b'},{id:'bc',a:'b',b:'c'}];assert.equal(analyzeGeometry(m).singularities.length,0)});
+test('pantógrafo em extremo gera aviso',()=>{const m=M();m.scissors=[{id:'s',x:0,y:0,diagonal:100,height:98}];assert.equal(analyzeGeometry(m).singularities.length,1)});
