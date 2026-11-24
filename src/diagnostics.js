@@ -187,3 +187,5 @@ export function analyzeMechanism(M, options = {}) {
   const status=severe||strongest.length?'incompatível':graph.mobility===0?'travado':'móvel';
   return {...graph,status,issues,residualMax,components:{nodes:nodes.length,bars:bars.length,gears:gears.length,racks:racks.length,scissors:scissors.length}};
 }
+// Compatibilidade dos testes e integrações que importam o resolvedor a partir do diagnóstico.
+export {solveConstraints} from './solver.js';
