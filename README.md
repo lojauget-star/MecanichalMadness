@@ -124,3 +124,5 @@ A ferramenta **⊕ Pivô na peça (H)** coloca uma articulação diretamente sob
 O arraste inverso evita clonagem integral do projeto a cada quadro, usa taxa moderada de atualização e tenta pequenos avanços cinemáticos quando uma meta está fora do curso alcançável, preservando os comprimentos. A impossibilidade geométrica é sinalizada; esse tratamento não certifica passagem segura por singularidades. A paleta desktop mostra os ícones numa grade de quatro colunas; a versão mobile oferece um botão de grade expandida e mantém a faixa de acesso rápido.
 
 **Limite:** junção no interior da barra é tratada como articulável para outras barras, mas o segmento que a hospeda continua rigidamente íntegro. Não é uma dobradiça que permita dobrar a própria barra ao meio (o que exigiria dividi-la em dois elos).
+
+O botão **↖ Selecionar** agora permanece na bancada para retornar ao modo de teste sem procurar o menu. Também há um teste direto de arraste do pivô interno, e a exclusão do componente que hospeda um pivô preserva o nó como articulação livre para as barras restantes.

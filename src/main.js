@@ -707,7 +707,7 @@ function deleteItem(type,id){
  const group=groupForTarget({type,id});
  if(group){M.pinLinks=M.pinLinks.filter(l=>l.scissorId!==group.id);M.pointLinks=M.pointLinks.filter(l=>!([...group.topIds,...group.bottomIds,...group.centerIds].includes(l.nodeId)));M.nodeLinks=M.nodeLinks.filter(l=>!([...group.topIds,...group.bottomIds,...group.centerIds].includes(l.a)||[...group.topIds,...group.bottomIds,...group.centerIds].includes(l.b)));const ids=new Set([...group.topIds,...group.bottomIds,...group.centerIds]);M.nodes=M.nodes.filter(n=>!ids.has(n.id));M.bars=M.bars.filter(b=>!ids.has(b.a)&&!ids.has(b.b));M.aligns=M.aligns.filter(a=>!ids.has(a.a)&&!ids.has(a.b));M.scissors=M.scissors.filter(g=>g.id!==group.id);select(null);solve();render();toast('Módulo pantográfico removido.');return}
 
-  if(type==='node'){M.nodeLinks=M.nodeLinks.filter(l=>l.a!==id&&l.b!==id);M.pointLinks=M.pointLinks.filter(l=>l.nodeId!==id&&rack(l.rackId)?.node!==id);M.pinLinks=M.pinLinks.filter(l=>rack(l.rackId)?.node!==id);M.bars=M.bars.filter(b=>b.a!==id&&b.b!==id);M.gears=M.gears.filter(g=>g.node!==id);M.racks=M.racks.filter(r=>r.node!==id);M.aligns=M.aligns.filter(a=>a.a!==id&&a.b!==id);M.nodes=M.nodes.filter(n=>n.id!==id);M.nodes=M.nodes.filter(n=>!n.follower||(n.follower.gear?M.gears.some(g=>g.id===n.follower.gear):n.follower.bar?M.bars.some(b=>b.id===n.follower.bar):n.follower.rack?M.racks.some(r=>r.id===n.follower.rack):true))}
+  if(type==='node'){M.nodeLinks=M.nodeLinks.filter(l=>l.a!==id&&l.b!==id);M.pointLinks=M.pointLinks.filter(l=>l.nodeId!==id&&rack(l.rackId)?.node!==id);M.pinLinks=M.pinLinks.filter(l=>rack(l.rackId)?.node!==id);M.bars=M.bars.filter(b=>b.a!==id&&b.b!==id);M.gears=M.gears.filter(g=>g.node!==id);M.racks=M.racks.filter(r=>r.node!==id);M.aligns=M.aligns.filter(a=>a.a!==id&&a.b!==id);M.nodes=M.nodes.filter(n=>n.id!==id);/* Pivôs anexados permanecem como pontos livres caso a peça de origem seja removida. */}
   if(type==='bar'){detachPivotsFrom(M,'bar',id);M.bars=M.bars.filter(b=>b.id!==id)}
   if(type==='gear'){detachPivotsFrom(M,'gear',id);M.gears=M.gears.filter(g=>g.id!==id);M.racks.forEach(r=>{if(r.gearId===id)disconnectRack(r)})}
   if(type==='rack'){detachPivotsFrom(M,'rack',id);M.pointLinks=M.pointLinks.filter(l=>l.rackId!==id);M.pinLinks=M.pinLinks.filter(l=>l.rackId!==id);M.racks=M.racks.filter(r=>r.id!==id)}
@@ -1335,6 +1335,7 @@ $('resetBtn').onclick=()=>{t=0;playing=false;updatePlay();solve(180);render();up
 $('stepBtn').onclick=()=>{playing=false;updatePlay();t+=.05;solve(120);render();updateTime()};
 $('speedControl').oninput=e=>{speed=Number(e.target.value);$('speedText').textContent=speed.toFixed(1)+'×'};
 $('zoomIn').onclick=()=>{cam.scale=clamp(cam.scale*1.2,.3,4.5);render()};$('zoomOut').onclick=()=>{cam.scale=clamp(cam.scale/1.2,.3,4.5);render()};$('fitBtn').onclick=fit;
+$('quickSelect')?.addEventListener('click',()=>setTool('select'));
 $('paletteToggle')?.addEventListener('click',()=>{
  const expanded=$('palette').classList.toggle('expanded');
  $('paletteToggle').setAttribute('aria-expanded',String(expanded));

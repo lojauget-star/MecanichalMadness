@@ -329,3 +329,8 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important;transfo
  .left.expanded .tool-symbol{flex:0 0 24px;width:25px;height:24px}
  .left.expanded .tool-name{font-size:9px}
 }
+
+/* V21: comando rápido de seleção na bancada. */
+#quickSelect{background:#264e44;border-color:#6ba991;color:#e1fff2;font-weight:750}
+#quickSelect:hover{background:#346254}
+@media(max-width:700px){#quickSelect{font-size:10px;min-width:47px;padding:6px 8px}}

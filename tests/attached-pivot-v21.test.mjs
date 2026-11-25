@@ -40,3 +40,15 @@ test('desprender não apaga pivô nem barras que o utilizam',()=>{
  const m=M(),a=n(m,'a',0,0),b=n(m,'b',100,0),source=bar(m,a,b),p=attachPivot(m,'bar',source.id,{x:40,y:0});
  assert.equal(detachPivotsFrom(m,'bar',source.id),1);assert.equal(p.follower,null);assert.ok(m.nodes.includes(p));
 });
+
+test('arrastar o próprio pivô incorporado transmite movimento à barra',()=>{
+ const m=M(),a=n(m,'a',0,0,true),z=n(m,'z',160,0);
+ const source=bar(m,a,z),p=attachPivot(m,'bar',source.id,{x:80,y:0});
+ const initial=p.y;
+ const solved=solveConstraints(m,{goals:new Map([[p.id+'.y',45]]),goalWeight:.4,iterations:27,strict:true});
+ assert.ok(solved.ok,JSON.stringify(solved));
+ assert.ok(p.y>initial+1,'pivô móvel deve acionar a barra');
+ assert.ok(Math.abs(Math.hypot(a.x-z.x,a.y-z.y)-source.length)<.15);
+ const projected=attachedPivotPosition(m,p.follower);
+ assert.ok(Math.hypot(projected.x-p.x,projected.y-p.y)<.15);
+});
