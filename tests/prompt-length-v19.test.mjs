@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import handler from '../netlify/functions/mechanical-advisor.mjs';
+import {referenceWallTable} from '../src/functional-design.js';
 const endpoint='https://example.netlify.app/.netlify/functions/mechanical-advisor';
 async function withEnv(fn){
  const keys=['GEMINI_API_KEY','OPENAI_API_KEY','KINETIKA_ASSISTANT_ACCESS_CODE','GEMINI_MODEL','KINETIKA_AI_PROVIDER'];
@@ -10,7 +11,7 @@ async function withEnv(fn){
  try{await fn()}finally{for(const key of keys){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key]}globalThis.fetch=originalFetch;}
 }
 const req=question=>new Request(endpoint,{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':'mock-access'},body:JSON.stringify({question,project:{nodes:2,bars:1}})});
-const plan={title:'Estudo da mesa',explanation:'Suporte articulado com pivôs e apoio.',steps:['Fixar apoios','Testar abertura'],warnings:['Validar geometria'],template:'none',assembly:{nodes:[],bars:[],gears:[],racks:[],mates:[]}};
+const plan=referenceWallTable(); // Resposta simulada deve cumprir o requisito funcional solicitado.
 test('descrição acima de 700 caracteres chega integralmente ao Gemini',()=>withEnv(async()=>{
  let payload=null;
  globalThis.fetch=async(_url,options)=>{payload=JSON.parse(options.body);return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(plan)}]}}]}),{status:200})};
