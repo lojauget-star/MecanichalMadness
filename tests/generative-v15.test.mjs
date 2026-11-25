@@ -43,7 +43,7 @@ test('Gemini retorna montagem arbitrária (não template em cruz), sem alterar p
  const plan={title:'Articulação de quatro barras',explanation:'Quatro pivôs ligados por barras.',steps:['Fixar A e D','Mover a barra AB'],warnings:['Verifique singularidades'],template:'custom',assembly:fourbar};let posted;
  globalThis.fetch=async(url,req)=>{posted=JSON.parse(req.body);return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(plan)}]}}]}),{status:200})};
  const req=new Request('https://example.netlify.app/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'x-kinetika-access':'access','content-type':'application/json'},body:JSON.stringify({question:'Quero mecanismo dobrável de quatro barras'})});
- const res=await handler(req),body=await res.json();assert.equal(res.status,200,JSON.stringify(body));assert.equal(body.provider,'gemini');assert.equal(body.plan.template,'custom');assert.equal(body.plan.assembly.bars.length,3);assert.ok(posted.generationConfig.responseSchema.properties.assembly);
+ const res=await handler(req),body=await res.json();assert.equal(res.status,200,JSON.stringify(body));assert.equal(body.provider,'gemini');assert.equal(body.plan.template,'custom');assert.equal(body.plan.assembly.bars.length,3);assert.ok(posted.generationConfig.responseJsonSchema.properties.assembly);
 }));
 test('chave OpenAI isolada nunca gera faturamento automaticamente',()=>mockEnv({OPENAI_API_KEY:'paid',KINETIKA_ASSISTANT_ACCESS_CODE:'access'},async()=>{
  globalThis.fetch=()=>{throw Error('OpenAI não deveria ser chamada')};const r=await handler(new Request('https://example.netlify.app/.netlify/functions/mechanical-advisor'));

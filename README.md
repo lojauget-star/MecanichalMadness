@@ -98,3 +98,7 @@ A função `GET /.netlify/functions/mechanical-advisor` informa um `diagnostic` 
 O painel apresenta o diagnóstico real. Se GET retornar 404, verifique Functions e o deploy; se a API do Google retornar 404 em POST, verifique o `GEMINI_MODEL`.
 
 A configuração do Netlify deve incluir o escopo **Functions**, o contexto **Production** e um novo deploy; editar variáveis sem redeploy não basta. Não exponha `GEMINI_API_KEY` em `VITE_*` nem no GitHub.
+
+## V17 · Correção HTTP 400 Gemini
+
+O GET `diagnostic:ready` apenas confirma que as variáveis foram reconhecidas; não testa a API do Google. A função agora usa `generationConfig.responseJsonSchema`, que aceita JSON Schema, em vez de `responseSchema`, que usa o dialeto Gemini mais restrito. Em HTTP 400 (exceto chave explicitamente inválida), há uma segunda tentativa com `responseMimeType: application/json` sem esquema, validada integralmente no servidor antes de inserir qualquer peça. Falhas devolvem `diagnostic` e `providerStatus` sem divulgar API keys, prompts, respostas ou erros crus do provedor. HTTP 429/5xx não acionam OpenAI paga nem inserem automaticamente templates locais. Depois de publicar, atualize a página e tente novamente com o mesmo código de acesso.

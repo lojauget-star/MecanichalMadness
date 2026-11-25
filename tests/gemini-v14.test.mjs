@@ -31,7 +31,8 @@ test('Gemini usa endpoint oficial com chave somente no servidor e devolve plano 
  assert.equal(requests.length,1);assert.match(requests[0].url,/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent/);
  assert.equal(requests[0].options.headers['x-goog-api-key'],'my-private-key');
  const payload=JSON.parse(requests[0].options.body);assert.equal(payload.generationConfig.responseMimeType,'application/json');
- assert.equal(payload.generationConfig.responseSchema.properties.template.type,'string');
+ assert.equal(payload.generationConfig.responseJsonSchema.properties.template.type,'string');
+ assert.equal(payload.generationConfig.responseSchema,undefined);
  assert.ok(!JSON.stringify(data).includes('my-private-key'));
 }));
 test('código incorreto impede a chamada externa',()=>withEnvironment({GEMINI_API_KEY:'g',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
@@ -50,4 +51,31 @@ test('modelo Gemini inválido bloqueia URL e consulta externa',()=>withEnvironme
 test('modelo OpenAI só é escolhido sob configuração explícita',()=>withEnvironment({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o',KINETIKA_ASSISTANT_ACCESS_CODE:'secret',KINETIKA_AI_PROVIDER:'openai'},async()=>{
  let url;globalThis.fetch=async(u)=>{url=u;return new Response(JSON.stringify({output:[{content:[{type:'output_text',text:JSON.stringify(mockPlan)}]}]}),{status:200})};
  const response=await handler(request());assert.equal(response.status,200);assert.equal((await response.json()).provider,'openai');assert.match(url,/api\.openai\.com/);
+}));
+
+test('esquema rejeitado com HTTP 400: tenta novamente em modo JSON sem esquema',()=>withEnvironment({GEMINI_API_KEY:'test-private',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ const sent=[];
+ globalThis.fetch=async(url,options)=>{
+  sent.push({url,payload:JSON.parse(options.body)});
+  if(sent.length===1)return new Response(JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'Unsupported responseSchema additionalProperties'}}),{status:400});
+  return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(mockPlan)}]}}]}),{status:200});
+ };
+ const res=await handler(request());const data=await res.json();
+ assert.equal(res.status,200,JSON.stringify(data));
+ assert.equal(data.provider,'gemini');assert.equal(sent.length,2);
+ assert.ok(sent[0].payload.generationConfig.responseJsonSchema);
+ assert.equal(sent[0].payload.generationConfig.responseSchema,undefined);
+ assert.equal(sent[1].payload.generationConfig.responseJsonSchema,undefined);
+ assert.ok(sent.every(x=>x.url.includes('generativelanguage.googleapis.com')));
+}));
+test('HTTP 400 persistente exibe código seguro, nunca a chave',()=>withEnvironment({GEMINI_API_KEY:'private-key',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ let calls=0;globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'Malformed JSON request'}}),{status:400})};
+ const res=await handler(request()),data=await res.json();
+ assert.equal(res.status,502);assert.equal(data.providerStatus,400);assert.equal(data.diagnostic,'gemini_bad_request');
+ assert.equal(calls,2);assert.ok(!JSON.stringify(data).includes('private-key'));
+}));
+test('HTTP 503 do Gemini informa falha do provedor sem cobrança em outro provedor',()=>withEnvironment({GEMINI_API_KEY:'g',OPENAI_API_KEY:'paid',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ let calls=0;globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'UNAVAILABLE'}}),{status:503})};
+ const res=await handler(request()),data=await res.json();
+ assert.equal(res.status,502);assert.equal(data.providerStatus,503);assert.equal(data.diagnostic,'provider_server_error');assert.equal(calls,1);
 }));

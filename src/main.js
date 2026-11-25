@@ -1312,7 +1312,7 @@ async function advisorStatus(){
   advisorOnline=data.available===true;advisorProvider=advisorOnline?data.provider:null;
   if(advisorOnline){
    advisorUnavailableDetail='';
-   badge.textContent=advisorProvider==='gemini'?'● Gemini reconhecido no Netlify. Informe seu código de acesso para gerar uma montagem.':'● IA online reconhecida. Informe seu código de acesso.';
+   badge.textContent=advisorProvider==='gemini'?'● Gemini configurado no Netlify. A conexão efetiva será testada ao gerar a proposta.':'● IA online reconhecida. Informe seu código de acesso.';
   }else if(data.diagnostic==='missing_access_code'){
    advisorUnavailableDetail='A chave da IA foi reconhecida pela função, mas falta KINETIKA_ASSISTANT_ACCESS_CODE (ou a variável não está acessível ao escopo Functions). Configure um código privado no Netlify, habilite Functions e Production e faça um novo deploy.';
    badge.textContent='○ Chave Gemini reconhecida · falta o código de acesso no Netlify.';

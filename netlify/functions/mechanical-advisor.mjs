@@ -39,20 +39,50 @@ function selectedProvider(env){
 }
 export {selectedProvider};
 
+
+/** JSON Schema uses responseJsonSchema; responseSchema is a narrower Gemini dialect.
+ * On HTTP 400, retry once with JSON mode only and validate on the server.
+ */
 async function geminiPlan(prompt,signal,env){
- const model=String(env.GEMINI_MODEL||'gemini-3.5-flash-lite');
- // Permitir somente identificadores de modelos; nunca interpolar URLs arbitrárias.
- if(!/^gemini-[a-z0-9][a-z0-9.\-]{1,60}$/.test(model))throw Error('Modelo Gemini inválido');
- const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
-  method:'POST',signal,headers:{'x-goog-api-key':env.GEMINI_API_KEY,'content-type':'application/json'},
-  body:JSON.stringify({systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:.5,maxOutputTokens:3900,responseMimeType:'application/json',responseSchema:schema}})
- });
- if(!response.ok)return {error:response.status===429?'Cota de requisições do Gemini atingida. A biblioteca local continua disponível.':response.status===403||response.status===401?'Chave Gemini sem permissão ou sem franquia disponível neste projeto.':response.status===404?'Modelo Gemini não disponível para este projeto. Confira GEMINI_MODEL.':'O Gemini não concluiu a solicitação.',status:response.status};
- const data=await response.json();
- const result=(data.candidates||[]).flatMap(c=>c.content?.parts||[]).map(p=>p.text||'').join('').trim();
- if(!result)return {error:'O Gemini não retornou uma proposta interpretável.',status:502};
- return {plan:normalizePlan(JSON.parse(result))};
+ const model=String(env.GEMINI_MODEL||'gemini-3.5-flash-lite').trim();
+ if(!/^gemini-[a-z0-9][a-z0-9.\-]{1,60}$/.test(model))return {error:'GEMINI_MODEL não é um identificador válido.',status:502,diagnostic:'invalid_model_setting'};
+ const url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent';
+ const invoke=async structured=>{
+  const generationConfig={temperature:.35,maxOutputTokens:3900,responseMimeType:'application/json'};
+  if(structured)generationConfig.responseJsonSchema=schema;
+  const input=structured?prompt:prompt+'\n\nRetorne apenas JSON válido com as chaves title, explanation, steps, warnings, template e assembly. Assembly possui arrays nodes, bars, gears, racks e mates. Obedeça às restrições da instrução de sistema.';
+  const response=await fetch(url,{method:'POST',signal,headers:{'x-goog-api-key':env.GEMINI_API_KEY,'content-type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig})});
+  let data={};
+  try{data=await response.json()}catch{}
+  if(!response.ok)return {httpStatus:response.status,googleMessage:String(data?.error?.message||'').slice(0,350)};
+  const answer=(data.candidates||[]).flatMap(c=>c.content?.parts||[]).map(p=>p.text||'').join('').trim();
+  return {answer,finishReason:data.candidates?.[0]?.finishReason||''};
+ };
+ let response=await invoke(true);
+ if(response.httpStatus===400&&!/API_KEY_INVALID|API_KEY_EXPIRED|api key not valid|key expired/i.test(response.googleMessage)){
+  response=await invoke(false);
+ }
+ if(response.httpStatus){
+  const status=response.httpStatus;
+  const invalidKey=/API_KEY_INVALID|API_KEY_EXPIRED|api key not valid|key expired/i.test(response.googleMessage);
+  const msg=status===429?'Cota do Gemini atingida. Nenhum modelo pago será usado automaticamente.':
+   invalidKey?'O Google recusou a chave Gemini; confira a chave no Google AI Studio.':
+   [401,403].includes(status)?'A chave Gemini não tem permissão para esta chamada (HTTP '+status+').':
+   status===404?'O modelo '+model+' não está disponível para este projeto. Revise GEMINI_MODEL.':
+   status===400?'O Google rejeitou a requisição (HTTP 400), mesmo no modo JSON simplificado. Consulte os logs de Functions do Netlify.':
+   status>=500?'O Google retornou erro temporário (HTTP '+status+'). Tente novamente.':
+   'A API do Google retornou HTTP '+status+'. Consulte os logs de Functions.';
+  return {error:msg,status:status===429?429:502,providerStatus:status,diagnostic:invalidKey?'invalid_api_key':status===400?'gemini_bad_request':status===404?'model_unavailable':status===429?'quota_exceeded':status>=500?'provider_server_error':'provider_http_error'};
+ }
+ if(!response.answer)return {error:response.finishReason==='MAX_TOKENS'?'O Gemini esgotou o limite de tokens antes de concluir a montagem.':'O Gemini não retornou texto de proposta.',status:502,diagnostic:'empty_ai_response'};
+ try{
+  const clean=response.answer.replace(/^\s*```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'');
+  return {plan:normalizePlan(JSON.parse(clean))};
+ }catch{
+  return {error:'O Gemini respondeu, mas a estrutura gerada não passou na validação. Tente um objetivo mais específico.',status:502,diagnostic:'invalid_ai_output'};
+ }
 }
+
 async function openaiPlan(prompt,signal,env){
  const response=await fetch('https://api.openai.com/v1/responses',{
   method:'POST',signal,headers:{authorization:`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},
@@ -90,7 +120,7 @@ export default async function handler(request){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),29000);
  try{
   const output=provider==='gemini'?await geminiPlan(prompt,controller.signal,env):await openaiPlan(prompt,controller.signal,env);
-  if(output.error)return json({error:output.error,provider},output.status===429?429:502);
+  if(output.error)return json({error:output.error,provider,diagnostic:output.diagnostic||'ai_request_failed',providerStatus:output.providerStatus||null},output.status===429?429:502);
   return json({mode:'ai',provider,plan:output.plan});
  }catch{return json({error:'A IA não conseguiu fornecer uma montagem estruturada válida. Confira o modelo e tente reformular o objetivo; a biblioteca local permanece disponível.',provider},502)}
  finally{clearTimeout(timer)}
