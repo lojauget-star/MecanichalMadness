@@ -110,3 +110,9 @@ O erro 402 do Google indica bloqueio de faturamento ou saldo Prepay esgotado na 
 ## V19 · Campo de descrição ampliado
 
 O campo **Projetar com IA** permite até **4.000 caracteres** (antes: 700), com contador em tempo real e caixa de texto maior. O endpoint Netlify também aceita 4.000 caracteres, rejeita textos excedentes com HTTP 413 e `diagnostic:prompt_too_long` (sem cortar o final silenciosamente) e protege o corpo da requisição com limite de 32 KB. Os detalhes de posições aberta/fechada, apoios, dimensões e restrições são enviados integralmente ao Gemini. Textos mais detalhados consomem mais tokens, mas não garantem que a montagem 2D represente completamente o produto físico.
+
+## V20 · Verificação da função, não apenas conexões
+
+Para solicitações de **mesa retrátil de parede**, o assistente agora avalia duas posições (horizontal aberta, quase vertical recolhida) e uma trajetória cinemática de referência com dobradiça fixa, escora e guia. A validação anterior só conferia vínculos e comprimentos. Propostas de barras em Y sem função verificável recebem HTTP 422 / `functional_not_verified`, em vez de entrar silenciosamente no projeto.
+
+A biblioteca oferece uma referência lateral identificada como **exemplo local, não IA**. Sua vista 2D apresenta um tampo ilustrativo preso à barra A–T; o painel ilustrado não participa da colisão nem dos esforços. A faixa avaliada é 0–85°, evitando alinhamento singular a 90°. A solução não comprova estabilidade, esforços, trava, espessura, dobradiças reais ou fabricação. Outras topologias podem funcionar, mas ainda não são cobertas pelo avaliador. Requer testes físicos posteriores.

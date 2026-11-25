@@ -7,6 +7,7 @@ import {analyzeGeometry} from './geometry.js';
 import {isDraftBar,isConnectedScissor,countScissorContacts,validateNodeJoint,translateScissorToVertex} from './links.js';
 import {planMotionSweep,capturePose,summarizeMotionSweep,sampleSeverity} from './sweep.js';
 import {suggestLocalPlan,modelSummary,appendCrossRacks,normalizeAdvisorPlan} from './design-assistant.js';
+import {functionalIntent,auditWallTableAssembly} from './functional-design.js';
 import {appendCustomAssembly} from './assembly-builder.js';
 // KINÉTIKA V13 | Juntas em todos os vértices, orientação preservada e cotas de barras traváveis.
 const $=id=>document.getElementById(id);
@@ -23,7 +24,7 @@ function inspectGeometry(force=false){const now=performance.now();if(force||!geo
 let lastSolveInfo={status:'initial',maxResidual:0,iterations:0};
 let M,sel=null,multi=[],tool='select',pending=null,pendingPort=null,hoverPort=null,drag=null,manualDrive=null,snapCandidate=null,pointer={x:0,y:0},playing=false,t=0,speed=1,maxResidual=0,toastTimer=0;
 let cam={x:0,y:0,scale:1.5},view={x:-300,y:-220,w:600,h:440};
-const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],pinLinks:[],pointLinks:[],nodeLinks:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
+const serial=()=>({nodes:[],bars:[],gears:[],mates:[],racks:[],aligns:[],pinLinks:[],pointLinks:[],nodeLinks:[],designFeatures:[],next:1,name:'Projeto sem título',scissor:null,scissors:[]});
 const idFor=pre=>pre+(M.next++);
 const node=id=>M.nodes.find(n=>n.id===id);
 const bar=id=>M.bars.find(b=>b.id===id);
@@ -508,6 +509,16 @@ function sceneSVG(){
     s+=`<g data-kind="rack" data-id="${r.id}" transform="translate(${n.x},${n.y}) rotate(${node(r.node).slider.angle})"><rect x="${-r.length/2}" y="-8" width="${r.length}" height="22" rx="3" fill="#6f8b92" fill-opacity=".7" stroke="${highlight?'#aaffdc':'#b2c7c9'}" stroke-width="${highlight?3:1.5}"/>${teeth}<line x1="${-r.length/2+4}" y1="6" x2="${r.length/2-4}" y2="6" stroke="#365660" stroke-width="2"/><rect x="${-r.length/2}" y="-19" width="${r.length}" height="35" fill="transparent"/></g>`;
     s+=`<text transform="translate(${n.x},${n.y}) rotate(${node(r.node).slider.angle})" x="0" y="${side*36}" text-anchor="middle" fill="#94bfc3" font-size="10" pointer-events="none">R${index+1} · ${fmt(node(r.node).slider.angle,0)}°</text>`;
     if(highlight){const hp=rackRotateHandle(r);s+=`<line x1="${n.x}" y1="${n.y}" x2="${hp.x}" y2="${hp.y}" stroke="#f4be78" stroke-width="1.4" stroke-dasharray="4 5" pointer-events="none"/><circle data-kind="rack-rotate" data-id="${r.id}" cx="${hp.x}" cy="${hp.y}" r="${12/cam.scale+3}" stroke="#f4be78" fill="#644c2c" stroke-width="2"/><text x="${hp.x}" y="${hp.y+4}" text-anchor="middle" font-size="14" fill="#fff3da" pointer-events="none">⤾</text>`}
+  }
+  // Tampo ilustrativo em vista lateral: acompanha a barra A–T, sem simular sólido 3D.
+  for(const f of M.designFeatures||[]){
+    if(f.kind!=='wall_table')continue;
+    const A=node(f.hingeId),T=node(f.tipId);if(!A||!T)continue;
+    const dx=T.x-A.x,dy=T.y-A.y,L=Math.hypot(dx,dy);if(L<1)continue;
+    const nx=-dy/L*12,ny=dx/L*12;
+    const pts=[[A.x+nx,A.y+ny],[T.x+nx,T.y+ny],[T.x-nx,T.y-ny],[A.x-nx,A.y-ny]];
+    s+=`<rect x="${A.x-23}" y="${A.y-680}" width="18" height="1100" fill="#9cbbc0" fill-opacity=".12" pointer-events="none"/>`;
+    s+=`<polygon points="${pts.map(p=>p.join(',')).join(' ')}" fill="#e8bb82" fill-opacity=".24" stroke="#edc99a" stroke-width="1.6" pointer-events="none"/>`;
   }
   for(const b of M.bars){let a=node(b.a),c=node(b.b),hi=sel?.type==='bar'&&sel.id===b.id;let col=isDraftBar(b)?'#e5bc79':b.motor?(b.motor.type==='spring'?'#b8a0f9':'#f4be78'):'#76c7bf';
     s+=`<g data-kind="bar" data-id="${b.id}"><line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" stroke="${hi?'#b3ffe0':'#2c4955'}" stroke-width="${hi?18:16}" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" stroke="${col}" stroke-width="10" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" stroke="#c5fff2" stroke-opacity=".26" stroke-width="2" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" stroke="transparent" stroke-width="25"/></g>`;
@@ -1017,7 +1028,7 @@ function exportJSON(){download((M.name||'mecanismo').toLowerCase().normalize('NF
 function exportSVG(){const old=stage.getAttribute('viewBox'),content=`<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="${old}" width="1400" height="900">${sceneSVG()}</svg>`;download('kinetika-mecanismo.svg',content,'image/svg+xml');toast('Desenho SVG exportado.')}
 function loadJSON(input){let a=input?.project||input;if(!a||!Array.isArray(a.nodes)||!Array.isArray(a.bars)||!Array.isArray(a.gears)||!Array.isArray(a.mates)||!Array.isArray(a.racks))throw Error('Estrutura do arquivo incompatível');
   const known=new Set(a.nodes.map(n=>n.id));if(a.bars.some(b=>!known.has(b.a)||!known.has(b.b))||a.gears.some(g=>!known.has(g.node)))throw Error('Arquivo contém conexões inválidas');
-  M={...serial(),...a,nodes:a.nodes,bars:a.bars,gears:a.gears,mates:a.mates,racks:a.racks,aligns:a.aligns||[],pinLinks:a.pinLinks||[],pointLinks:a.pointLinks||[],nodeLinks:a.nodeLinks||[],scissors:a.scissors||[],next:Math.max(1,Number(a.next)||1)};M.next=Math.max(M.next,...[...M.nodes,...M.bars,...M.gears,...M.mates,...M.racks,...M.aligns].map(v=>Number(String(v.id).slice(1))+1||1));
+  M={...serial(),...a,nodes:a.nodes,bars:a.bars,gears:a.gears,mates:a.mates,racks:a.racks,aligns:a.aligns||[],pinLinks:a.pinLinks||[],pointLinks:a.pointLinks||[],nodeLinks:a.nodeLinks||[],scissors:a.scissors||[],designFeatures:Array.isArray(a.designFeatures)?a.designFeatures.filter(f=>f.kind==='wall_table').slice(0,20):[],next:Math.max(1,Number(a.next)||1)};M.next=Math.max(M.next,...[...M.nodes,...M.bars,...M.gears,...M.mates,...M.racks,...M.aligns].map(v=>Number(String(v.id).slice(1))+1||1));
   // Migração de projetos V1/V2: offset antigo era coordenada global X.
   const oldVersion=Number(input?.version||1);
   for(const r of M.racks){r.anchorX=clamp(Number(r.anchorX)||0,-r.length/2+6,r.length/2-6);r.side=r.side===-1?-1:1;const n=node(r.node);if(!n||!n.slider)continue;
@@ -1365,6 +1376,12 @@ function addAdvisorTemplate(){
   const centerX=M.nodes.length?maxX+270:cam.x,centerY=M.nodes.length?(Math.min(...M.nodes.map(n=>n.y))+Math.max(...M.nodes.map(n=>n.y)))/2:cam.y;
   if(advisorPlan.template==='custom'){
    const made=appendCustomAssembly(M,advisorPlan.assembly,centerX,centerY);
+   if(functionalIntent($('advisorQuestion').value)==='wall_table'){
+    const check=auditWallTableAssembly(advisorPlan.assembly);
+    if(!check.ok)throw Error('Sem validação funcional de mesa: '+check.reason);
+    const convert=new Map(advisorPlan.assembly.nodes.map((n,i)=>[n.id,made.nodes[i]]));
+    (M.designFeatures||(M.designFeatures=[])).push({kind:'wall_table',hingeId:convert.get(check.hingeId),tipId:convert.get(check.tipId),sliderId:convert.get(check.sliderId)});
+   }
    const residual=solve(180);
    if(!Number.isFinite(residual)||residual>1)throw Error(`restrições iniciais incompatíveis (residual ${fmt(residual,2)} mm). Revise apoios e medidas.`);
    const firstGear=made.gears[0],firstBar=made.bars[0];

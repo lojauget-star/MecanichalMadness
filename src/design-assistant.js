@@ -1,9 +1,11 @@
 /** KINÉTIKA: propostas locais verificáveis. Não são inferências de IA. */
 import {emptyAssembly,validateCustomAssembly} from './assembly-builder.js';
+import {functionalIntent,referenceWallTable} from './functional-design.js';
 export const TEMPLATE_IDS = Object.freeze(['cross_racks', 'scissor', 'custom', 'none']);
 const lower = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 export function suggestLocalPlan(question) {
   const text = lower(question);
+  if(functionalIntent(question)==='wall_table')return referenceWallTable();
   if (/(cruz|quatro direc|4 direc|quatro brac|4 brac|quatro cremalheir|4 cremalheir)/.test(text)) {
     return {
       template: 'cross_racks', title: 'Expansão em quatro direções',
