@@ -65,10 +65,18 @@ async function openaiPlan(prompt,signal,env){
  return {plan:normalizePlan(JSON.parse(result))};
 }
 export default async function handler(request){
- const env=process.env,provider=selectedProvider(env),available=Boolean(provider&&env.KINETIKA_ASSISTANT_ACCESS_CODE);
- if(request.method==='GET')return json({available,provider:available?provider:null,mode:available?'online':'local'});
+ const env=process.env,provider=selectedProvider(env),hasAccessCode=Boolean(String(env.KINETIKA_ASSISTANT_ACCESS_CODE||'').trim());
+ const available=Boolean(provider&&hasAccessCode);
+ // Diagnóstico sem revelar chaves, códigos ou conteúdos de variáveis de ambiente.
+ const diagnostic=available?'ready':!provider?'missing_provider_key':'missing_access_code';
+ if(request.method==='GET')return json({available,provider:provider||null,mode:available?'online':'local',diagnostic});
  if(request.method!=='POST')return json({error:'Método não permitido'},405);
- if(!available)return json({error:'IA online não configurada. Use as propostas locais gratuitamente.'},503);
+ if(!available)return json({
+  error:diagnostic==='missing_access_code'
+   ?'Gemini reconhecido, mas KINETIKA_ASSISTANT_ACCESS_CODE não está disponível no ambiente Functions do Netlify. Cadastre o código e faça um novo deploy.'
+   :'A chave Gemini não está disponível na função publicada. Verifique o nome GEMINI_API_KEY, o escopo Functions, o contexto Production e execute novo deploy.',
+  diagnostic
+ },503);
  if(Number(request.headers.get('content-length')||0)>8000)return json({error:'Requisição muito grande'},413);
  if(!sameSecret(request.headers.get('x-kinetika-access'),env.KINETIKA_ASSISTANT_ACCESS_CODE))return json({error:'Código de acesso inválido'},401);
  let payload;

@@ -1292,6 +1292,7 @@ history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
 
 // V15 · Projeto generativo por componentes, validação determinística e distinção explícita IA/biblioteca local.
 let advisorPlan=null,advisorOnline=false,advisorProvider=null,advisorBusy=false;
+let advisorUnavailableDetail='Verifique a configuração da função de IA no Netlify.';
 function advisorHtml(plan){
  const p=normalizeAdvisorPlan(plan),a=p.assembly||{nodes:[],bars:[],gears:[],racks:[],mates:[]};
  const counts=p.template==='custom'?`<p class="advisor-note"><strong>Montagem original:</strong> ${a.nodes.length} pivôs/apoios · ${a.bars.length} barras · ${a.gears.length} rodas · ${a.racks.length} cremalheiras · ${a.mates.length} transmissões. As medidas são hipóteses iniciais.</p>`:'';
@@ -1301,14 +1302,32 @@ function advisorHtml(plan){
 }
 async function advisorStatus(){
  const badge=$('advisorStatus');if(!badge)return;
- badge.textContent='Verificando disponibilidade do Gemini…';
+ badge.textContent='Verificando configuração da IA…';
+ advisorOnline=false;advisorProvider=null;
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),8500);
  try{
-  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),4500);
-  const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);
-  if(!res.ok)throw Error('Serviço indisponível');
-  const data=await res.json();advisorOnline=!!data.available;advisorProvider=advisorOnline?data.provider:null;
-  badge.textContent=advisorOnline?(advisorProvider==='gemini'?'● Gemini online disponível. Informe o código de acesso para gerar uma montagem original.':'● OpenAI online disponível. Informe o código de acesso para gerar uma montagem original.'):'○ IA não configurada no Netlify. Adicione GEMINI_API_KEY e KINETIKA_ASSISTANT_ACCESS_CODE; exemplos locais disponíveis abaixo.';
- }catch{advisorOnline=false;advisorProvider=null;badge.textContent='○ IA online não respondeu. Utilize a biblioteca local ou verifique as funções do Netlify.';}
+  const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal,cache:'no-store'});
+  if(!res.ok)throw Error(`Função do Netlify não respondeu corretamente (HTTP ${res.status}). Confira se mechanical-advisor foi publicada em Functions.`);
+  const data=await res.json();
+  advisorOnline=data.available===true;advisorProvider=advisorOnline?data.provider:null;
+  if(advisorOnline){
+   advisorUnavailableDetail='';
+   badge.textContent=advisorProvider==='gemini'?'● Gemini reconhecido no Netlify. Informe seu código de acesso para gerar uma montagem.':'● IA online reconhecida. Informe seu código de acesso.';
+  }else if(data.diagnostic==='missing_access_code'){
+   advisorUnavailableDetail='A chave da IA foi reconhecida pela função, mas falta KINETIKA_ASSISTANT_ACCESS_CODE (ou a variável não está acessível ao escopo Functions). Configure um código privado no Netlify, habilite Functions e Production e faça um novo deploy.';
+   badge.textContent='○ Chave Gemini reconhecida · falta o código de acesso no Netlify.';
+  }else if(data.diagnostic==='missing_provider_key'){
+   advisorUnavailableDetail='A função do Netlify está publicada, porém não reconheceu GEMINI_API_KEY. Confira o nome exato, o escopo Functions, o contexto Production e faça um novo deploy. Se KINETIKA_AI_PROVIDER estiver definido como openai, altere para gemini ou remova essa variável.';
+   badge.textContent='○ Função publicada · chave Gemini não encontrada no ambiente Functions.';
+  }else{
+   advisorUnavailableDetail='A função respondeu, mas não informou a configuração. Faça um novo deploy para utilizar o diagnóstico atualizado.';
+   badge.textContent='○ Configuração do assistente incompleta ou versão desatualizada.';
+  }
+ }catch(err){
+  advisorOnline=false;advisorProvider=null;
+  advisorUnavailableDetail=err.name==='AbortError'?'A função Netlify não respondeu em 8,5 segundos. Verifique a publicação e os logs em Functions.':String(err.message).slice(0,260);
+  badge.textContent='○ Serviço de IA inacessível · verifique o deploy das Functions.';
+ }finally{clearTimeout(timer)}
  $('advisorAccessRow').hidden=!advisorOnline;
 }
 function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisorResult').innerHTML=advisorHtml(advisorPlan);}
@@ -1316,7 +1335,7 @@ function advisorError(message){advisorPlan=null;$('advisorResult').innerHTML=`<d
 async function askAdvisor(){
  if(advisorBusy)return;
  const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo com pelo menos seis caracteres.';return;}
- if(!advisorOnline){advisorError('A API do Gemini não está disponível neste site. Configure a chave e o código no Netlify para gerar um mecanismo novo.');$('advisorStatus').textContent='IA indisponível · nenhuma sugestão apresentada como generativa.';return;}
+ if(!advisorOnline){advisorError(advisorUnavailableDetail);return;}
  const access=$('advisorAccess').value.trim();if(!access){advisorError('Informe o código de acesso ao Gemini configurado no Netlify.');$('advisorAccess').focus();return;}
  advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=`Consultando ${advisorProvider==='gemini'?'Gemini':'OpenAI'} para gerar geometria e conexões…`;
  try{

@@ -85,3 +85,16 @@ Depois de definir variáveis, faça novo deploy para aplicá-las. O endpoint GET
 - **Limites explícitos:** a montagem gerada é um **rascunho cinemático 2D**; solver local não valida resistência, fabricação, colisões tridimensionais ou curso completo. O conjunto de componentes geráveis é limitado aos tipos atualmente suportados; propostas complexas podem ser rejeitadas em vez de deformadas para caber no exemplo.
 
 Rode `npm run check && npm test && npm run build` na CI. Testes V15 incluem diferenças topológicas, transmissão, rejeição de modelos malformados e API Gemini simulada com novo `assembly` declarativo.
+
+
+## V16 · Diagnóstico de ativação da IA no Netlify
+
+A função `GET /.netlify/functions/mechanical-advisor` informa um `diagnostic` sem revelar segredos:
+
+- `ready`: chave do provedor e `KINETIKA_ASSISTANT_ACCESS_CODE` disponíveis na função publicada; **não comprova** que a API externa aceitou a chave.
+- `missing_access_code`: Gemini identificado, mas falta o código de acesso na função de produção.
+- `missing_provider_key`: função publicada, mas chave do provedor selecionado não encontrada no ambiente Functions. Se `KINETIKA_AI_PROVIDER=openai`, troque para `gemini` ou remova a variável.
+
+O painel apresenta o diagnóstico real. Se GET retornar 404, verifique Functions e o deploy; se a API do Google retornar 404 em POST, verifique o `GEMINI_MODEL`.
+
+A configuração do Netlify deve incluir o escopo **Functions**, o contexto **Production** e um novo deploy; editar variáveis sem redeploy não basta. Não exponha `GEMINI_API_KEY` em `VITE_*` nem no GitHub.

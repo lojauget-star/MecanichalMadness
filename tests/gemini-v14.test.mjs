@@ -12,7 +12,7 @@ async function withEnvironment(env,run){
  try{return await run()}finally{for(const k of keys){if(old[k]===undefined)delete process.env[k];else process.env[k]=old[k]}globalThis.fetch=oldFetch}
 }
 test('sem chave ou código funciona apenas a biblioteca local',()=>withEnvironment({},async()=>{
- const get=await handler(new Request(endpoint));assert.deepEqual(await get.json(),{available:false,provider:null,mode:'local'});
+ const get=await handler(new Request(endpoint));assert.deepEqual(await get.json(),{available:false,provider:null,mode:'local',diagnostic:'missing_provider_key'});
  const post=await handler(request());assert.equal(post.status,503);
 }));
 test('chaves Gemini e OpenAI: Gemini é selecionado primeiro, sem custos OpenAI imprevistos',()=>{
@@ -25,7 +25,7 @@ test('chaves Gemini e OpenAI: Gemini é selecionado primeiro, sem custos OpenAI 
 test('Gemini usa endpoint oficial com chave somente no servidor e devolve plano validado',()=>withEnvironment({GEMINI_API_KEY:'my-private-key',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
  const requests=[];
  globalThis.fetch=async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(mockPlan)}]}}]}),{status:200,headers:{'content-type':'application/json'}})};
- const ready=await handler(new Request(endpoint));assert.deepEqual(await ready.json(),{available:true,provider:'gemini',mode:'online'});
+ const ready=await handler(new Request(endpoint));assert.deepEqual(await ready.json(),{available:true,provider:'gemini',mode:'online',diagnostic:'ready'});
  const response=await handler(request());assert.equal(response.status,200);
  const data=await response.json();assert.equal(data.mode,'ai');assert.equal(data.provider,'gemini');assert.equal(data.plan.template,'cross_racks');
  assert.equal(requests.length,1);assert.match(requests[0].url,/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent/);
