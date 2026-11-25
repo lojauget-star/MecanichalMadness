@@ -106,3 +106,7 @@ O GET `diagnostic:ready` apenas confirma que as variáveis foram reconhecidas; n
 ## V18 · HTTP 402 (saldo Prepay / faturamento)
 
 O erro 402 do Google indica bloqueio de faturamento ou saldo Prepay esgotado na Gemini API. A API retorna `diagnostic: billing_required` e `providerStatus: 402`; o editor exibe um link para https://aistudio.google.com/billing. Nesse erro, não é feita nova tentativa, troca de modelo ou fallback para OpenAI paga. O `diagnostic: ready` do GET só comprova presença de variáveis e não verifica saldo/créditos. Caso prefira não pagar, use a biblioteca local ou uma chave de projeto efetivamente elegível ao nível gratuito. Não compartilhe sua chave nem código de acesso.
+
+## V19 · Campo de descrição ampliado
+
+O campo **Projetar com IA** permite até **4.000 caracteres** (antes: 700), com contador em tempo real e caixa de texto maior. O endpoint Netlify também aceita 4.000 caracteres, rejeita textos excedentes com HTTP 413 e `diagnostic:prompt_too_long` (sem cortar o final silenciosamente) e protege o corpo da requisição com limite de 32 KB. Os detalhes de posições aberta/fechada, apoios, dimensões e restrições são enviados integralmente ao Gemini. Textos mais detalhados consomem mais tokens, mas não garantem que a montagem 2D represente completamente o produto físico.

@@ -108,11 +108,12 @@ export default async function handler(request){
    :'A chave Gemini não está disponível na função publicada. Verifique o nome GEMINI_API_KEY, o escopo Functions, o contexto Production e execute novo deploy.',
   diagnostic
  },503);
- if(Number(request.headers.get('content-length')||0)>8000)return json({error:'Requisição muito grande'},413);
+ if(Number(request.headers.get('content-length')||0)>32000)return json({error:'Requisição muito grande (máximo 32 KB).'},413);
  if(!sameSecret(request.headers.get('x-kinetika-access'),env.KINETIKA_ASSISTANT_ACCESS_CODE))return json({error:'Código de acesso inválido'},401);
  let payload;
- try{const body=await request.text();if(body.length>8000)return json({error:'Requisição muito grande'},413);payload=JSON.parse(body);}catch{return json({error:'JSON inválido'},400)}
- const question=String(payload?.question||'').trim().slice(0,700);
+ try{const body=await request.text();if(body.length>32000)return json({error:'Requisição muito grande (máximo 32 KB).'},413);payload=JSON.parse(body);}catch{return json({error:'JSON inválido'},400)}
+ const question=String(payload?.question||'').trim();
+ if(question.length>4000)return json({error:'Descrição acima de 4.000 caracteres. Edite o texto antes de enviar; nenhum trecho será cortado silenciosamente.',diagnostic:'prompt_too_long'},413);
  if(question.length<6)return json({error:'Descreva melhor o movimento desejado.'},400);
  const m=payload?.project&&typeof payload.project==='object'?payload.project:{};
  const count=x=>Number.isFinite(Number(x))?Math.max(0,Math.min(9999,Math.floor(Number(x)))):0;

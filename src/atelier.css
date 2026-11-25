@@ -294,3 +294,11 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important;transfo
 .advisor-button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.advisor-button-row .btn{white-space:nowrap}.advisor-result .advisor-note{line-height:1.5}.advisor-result .advisor-result-head .advisor-tag{letter-spacing:.05em}
 
 .advisor-library-caption{font-size:10px;letter-spacing:.11em;font-weight:700;color:var(--muted,#778);align-self:center;margin-right:6px}
+
+/* V19 · Descrições de projeto mais completas, sem truncamento silencioso. */
+#advisorQuestion{min-height:176px;max-height:46vh;resize:vertical;line-height:1.6}
+.advisor-prompt-info{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin:6px 1px 12px;color:var(--muted,#788);font-size:11px;line-height:1.55}
+#advisorQuestionHelp{flex:1;max-width:70ch}
+#advisorChars{flex-shrink:0;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+#advisorChars.advisor-count-near{color:#a76a30}
+@media(max-width:600px){#advisorQuestion{min-height:154px;max-height:36vh}.advisor-prompt-info{flex-wrap:wrap}}

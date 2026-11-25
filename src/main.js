@@ -1291,6 +1291,8 @@ history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
 // KINÉTIKA V11 — percurso amostrado.
 
 // V15 · Projeto generativo por componentes, validação determinística e distinção explícita IA/biblioteca local.
+const ADVISOR_PROMPT_LIMIT=4000;
+function updateAdvisorCharCount(){const el=$('advisorQuestion'),counter=$('advisorChars');if(!el||!counter)return;const n=el.value.length;counter.textContent=n.toLocaleString('pt-BR')+' / 4.000 caracteres';counter.classList.toggle('advisor-count-near',n>=3600);}
 let advisorPlan=null,advisorOnline=false,advisorProvider=null,advisorBusy=false;
 let advisorUnavailableDetail='Verifique a configuração da função de IA no Netlify.';
 function advisorHtml(plan){
@@ -1334,7 +1336,7 @@ function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisor
 function advisorError(message,diagnostic=''){advisorPlan=null;const billing=diagnostic==='billing_required'?'<p><a href="https://aistudio.google.com/billing" target="_blank" rel="noopener noreferrer">Verificar faturamento no Google AI Studio</a>. A franquia gratuita depende da elegibilidade do projeto; não é possível contornar um bloqueio de cobrança modificando o modelo.</p>':'';$('advisorResult').innerHTML=`<div class="advisor-empty"><strong>Não foi possível criar uma montagem com IA.</strong><p>${str(message)}</p>${billing}<p>O projeto não foi alterado. A biblioteca local continua disponível sem API externa.</p></div>`;}
 async function askAdvisor(){
  if(advisorBusy)return;
- const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo com pelo menos seis caracteres.';return;}
+ const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo com pelo menos seis caracteres.';return;}if(question.length>ADVISOR_PROMPT_LIMIT){advisorError('A descrição ultrapassa 4.000 caracteres. Reduza apenas o excedente antes de enviar.');return;}
  if(!advisorOnline){advisorError(advisorUnavailableDetail);return;}
  const access=$('advisorAccess').value.trim();if(!access){advisorError('Informe o código de acesso ao Gemini configurado no Netlify.');$('advisorAccess').focus();return;}
  advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=`Consultando ${advisorProvider==='gemini'?'Gemini':'OpenAI'} para gerar geometria e conexões…`;
@@ -1378,6 +1380,8 @@ function advisorStatusTextError(message){$('advisorStatus').textContent=`Propost
 $('advisorBtn').addEventListener('click',()=>{$('advisorModal').classList.add('show');advisorStatus()});
 $('advisorAsk').addEventListener('click',askAdvisor);
 $('advisorLocal').addEventListener('click',localAdvisor);
+$('advisorQuestion').addEventListener('input',updateAdvisorCharCount);
+updateAdvisorCharCount();
 $('advisorQuestion').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')askAdvisor()});
 $('advisorResult').addEventListener('click',e=>{if(e.target.closest('#advisorApply'))addAdvisorTemplate()});
-document.querySelectorAll('[data-advisor-prompt]').forEach(button=>button.addEventListener('click',()=>{$('advisorQuestion').value=button.dataset.advisorPrompt;localAdvisor()}));
+document.querySelectorAll('[data-advisor-prompt]').forEach(button=>button.addEventListener('click',()=>{$('advisorQuestion').value=button.dataset.advisorPrompt;updateAdvisorCharCount();localAdvisor()}));
