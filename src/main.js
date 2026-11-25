@@ -1289,7 +1289,7 @@ history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
 // KINÉTIKA V11 — percurso amostrado.
 
 // V13 · Assistente de projetos: recomendações locais + IA opcional via Netlify.
-let advisorPlan=null,advisorOnline=false,advisorBusy=false;
+let advisorPlan=null,advisorOnline=false,advisorProvider=null,advisorBusy=false;
 function advisorHtml(plan){
  const p=normalizeAdvisorPlan(plan);
  return `<div class="advisor-result-head"><span class="advisor-tag">${p.mode==='ai'?'IA conectada · sugestão':'Biblioteca local · sugestão'}</span><h3>${str(p.title)}</h3><p>${str(p.explanation)}</p></div><div class="advisor-layout"><div><strong>Montagem proposta</strong><ol>${p.steps.map(step=>`<li>${str(step)}</li>`).join('')}</ol></div><div><strong>Restrições e cuidados</strong><ul>${p.warnings.map(w=>`<li>${str(w)}</li>`).join('')}</ul></div></div>${p.template==='none'?'<p class="advisor-note">Esta proposta ainda não tem gerador automático de peças. Utilize as ferramentas da biblioteca.</p>':`<button class="btn primary" id="advisorApply">＋ Adicionar montagem ao projeto atual</button><p class="advisor-note">Apenas modelos prontos e verificados são inseridos. A IA não altera diretamente sua montagem.</p>`}`;
@@ -1297,7 +1297,7 @@ function advisorHtml(plan){
 async function advisorStatus(){
  const badge=$('advisorStatus');if(!badge)return;
  badge.textContent='Verificando disponibilidade…';
- try{const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),3500);const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);const data=await res.json();advisorOnline=!!data.available;badge.textContent=advisorOnline?'IA online disponível · código de acesso necessário':'Modo local: biblioteca sem IA online';}catch{advisorOnline=false;badge.textContent='Modo local: biblioteca sem IA online';}
+ try{const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),3500);const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);const data=await res.json();advisorOnline=!!data.available;advisorProvider=advisorOnline?data.provider:null;badge.textContent=advisorOnline?(advisorProvider==='gemini'?'Gemini disponível · código de acesso necessário':'OpenAI disponível · código de acesso necessário'):'Modo local gratuito · sem chave';}catch{advisorOnline=false;advisorProvider=null;badge.textContent='Modo local gratuito · sem chave';}
  $('advisorAccessRow').hidden=!advisorOnline;
 }
 function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisorResult').innerHTML=advisorHtml(advisorPlan);}
@@ -1305,7 +1305,7 @@ async function askAdvisor(){
  if(advisorBusy)return;const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo em uma frase.';return;}
  advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=advisorOnline?'Consultando IA…':'Gerando sugestão local…';
  try{
-  if(advisorOnline){const response=await fetch('/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':$('advisorAccess').value},body:JSON.stringify({question,project:modelSummary(M)})});const result=await response.json();if(!response.ok)throw Error(result.error||'Falha na IA.');showAdvisorPlan({...result.plan,mode:'ai'});$('advisorStatus').textContent='Resposta da IA recebida. Confira as restrições antes de inserir.';}
+  if(advisorOnline){const response=await fetch('/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':$('advisorAccess').value},body:JSON.stringify({question,project:modelSummary(M)})});const result=await response.json();if(!response.ok)throw Error(result.error||'Falha na IA.');showAdvisorPlan({...result.plan,mode:'ai'});$('advisorStatus').textContent=(result.provider==='gemini'?'Gemini':'OpenAI')+' · proposta recebida. Confira as restrições antes de inserir.';}
   else{showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent='Sugestão da biblioteca local; não foi usada IA online.';}
  }catch(err){showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent=`${String(err.message).slice(0,110)} · Usando biblioteca local.`;}
  finally{advisorBusy=false;$('advisorAsk').disabled=false;}

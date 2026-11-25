@@ -55,3 +55,18 @@ A inspeção usa **amostragem temporal discreta** e perfis **2D aproximados**: b
 - **✦ Projetar:** propostas locais explicativas e inserção da transmissão em cruz, com quatro cremalheiras e engrenagem central. A montagem **é adicionada** ao projeto atual; não substitui as peças existentes. Há um template de pantógrafo e sugestões textuais para biela-manivela.
 - **IA online opcional:** função Netlify `/.netlify/functions/mechanical-advisor` usando a API Responses. Para habilitar em Site configuration → Environment variables, configure **OPENAI_API_KEY** e **KINETIKA_ASSISTANT_ACCESS_CODE** (código privado de acesso ao recurso). Opcional: **OPENAI_MODEL**. Nenhuma chave aparece no navegador ou no GitHub. Se não estiver configurada, o assistente avisa que usa somente regras locais. **A API da OpenAI tem custos próprios; o ChatGPT Plus não inclui créditos de API.** A função exige código de acesso; configure proteção adicional/limites de taxa antes de disponibilizar a terceiros.
 - **Cautela:** a transmissão em cruz é uma aproximação cinemática 2D. Quatro cremalheiras tangenciais podem ter interferências entre si no mesmo plano físico; a montagem real poderá exigir diferentes alturas, espaçadores, mancais e guias. A proposta não é validação estrutural.
+
+## V14 · Gemini como provedor principal
+
+A biblioteca de propostas locais continua **gratuita e sem chave**. A IA generativa usa **Gemini** por padrão quando configurado. Uma chave gratuita da API do Google sempre pertence a um projeto Google AI Studio (as cotas/eligibilidade variam); não existe chave compartilhada pública e ilimitada segura.
+
+No Netlify → **Site configuration → Environment variables** configure:
+- `GEMINI_API_KEY` = chave privada existente do seu projeto Google AI Studio (nunca em repositório ou variáveis `VITE_*`).
+- `KINETIKA_ASSISTANT_ACCESS_CODE` = código secreto de acesso para o protótipo privado.
+- `GEMINI_MODEL` = `gemini-3.5-flash-lite` (opcional; pode variar conforme a disponibilidade de seu projeto).
+- `KINETIKA_AI_PROVIDER` = `gemini` ou `openai` (opcional). Sem escolha explícita, Gemini é preferido. **Nunca há fallback automático para OpenAI paga quando Gemini atinge o limite.**
+- `OPENAI_API_KEY` e `OPENAI_MODEL` = opcionais, apenas caso decida usar OpenAI.
+
+Após configurar as variáveis, publique outro deploy. A chave não aparece no navegador nem no GET de disponibilidade. Se faltar chave/código, ou a chamada alcançar o limite, o editor recua para as sugestões locais gratuitamente.
+
+**Produção pública:** um código compartilhado não é autenticação robusta e não impede uso abusivo se vazar. Antes de liberar amplamente, implementar login individual, cotas por usuário, limitação de taxa distribuída e monitoramento de custos.

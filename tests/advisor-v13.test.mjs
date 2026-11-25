@@ -30,7 +30,7 @@ test('endpoint do Netlify retorna indisponível sem chaves e não chama API exte
   delete process.env.OPENAI_API_KEY;delete process.env.KINETIKA_ASSISTANT_ACCESS_CODE;
   try{
     let res=await handler(new Request('https://test/.netlify/functions/mechanical-advisor'));
-    assert.equal(res.status,200);assert.deepEqual(await res.json(),{available:false});
+    assert.equal(res.status,200);assert.deepEqual(await res.json(),{available:false,provider:null,mode:'local'});
     res=await handler(new Request('https://test/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:'girar uma engrenagem'})}));
     assert.equal(res.status,503);
   }finally{if(oldKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=oldKey;if(oldAccess===undefined)delete process.env.KINETIKA_ASSISTANT_ACCESS_CODE;else process.env.KINETIKA_ASSISTANT_ACCESS_CODE=oldAccess}
