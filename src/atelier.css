@@ -289,3 +289,8 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important;transfo
 .joint-entry span{font-size:10px;overflow-wrap:anywhere;line-height:1.5;color:#405d51}
 .joint-entry .btn{flex:none}
 @media(max-width:720px){.advisor-modal{width:100%;max-height:92dvh;border-radius:18px 18px 0 0;padding:20px}.advisor-layout{grid-template-columns:1fr;gap:10px}.advisor-prompts{gap:5px}.advisor-prompt-actions{flex-direction:column;align-items:stretch}.advisor-prompt-actions .btn{width:100%}#advisorStatus{order:2}}
+
+/* V15: diferenciar ação generativa de consulta à biblioteca */
+.advisor-button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.advisor-button-row .btn{white-space:nowrap}.advisor-result .advisor-note{line-height:1.5}.advisor-result .advisor-result-head .advisor-tag{letter-spacing:.05em}
+
+.advisor-library-caption{font-size:10px;letter-spacing:.11em;font-weight:700;color:var(--muted,#778);align-self:center;margin-right:6px}

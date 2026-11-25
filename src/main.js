@@ -7,6 +7,7 @@ import {analyzeGeometry} from './geometry.js';
 import {isDraftBar,isConnectedScissor,countScissorContacts,validateNodeJoint,translateScissorToVertex} from './links.js';
 import {planMotionSweep,capturePose,summarizeMotionSweep,sampleSeverity} from './sweep.js';
 import {suggestLocalPlan,modelSummary,appendCrossRacks,normalizeAdvisorPlan} from './design-assistant.js';
+import {appendCustomAssembly} from './assembly-builder.js';
 // KINÉTIKA V13 | Juntas em todos os vértices, orientação preservada e cotas de barras traváveis.
 const $=id=>document.getElementById(id);
 const stage=$('stage');
@@ -997,7 +998,8 @@ function goPreset(name){pendingPort=null;hoverPort=null;if(name==='scissor'){cre
     const bottom=addRack(-48,radius);node(bottom.node).slider.range=420;bottom.length=190;connectRack(bottom,a,1);
     const other=addRack(orthogonal?radius:-48,orthogonal?-48:-radius);
     node(other.node).slider.range=420;other.length=190;rotateRack(other,orthogonal?90:0);connectRack(other,a,-1);
-  }else if(name==='rackscissor'){    M.name='Pinhão + cremalheira + pantógrafo';
+  }else if(name==='rackscissor'){
+    M.name='Pinhão + cremalheira + pantógrafo';
     const a=g(-110,100,'gear',24),r=addRack(-110,100-a.radius-RACK_CLEARANCE);r.length=230;
     node(r.node).slider.range=240;connectRack(r,a,-1);
     const sg=createScissor(3,110,140,false);attachRackScissor(r,sg);
@@ -1288,42 +1290,75 @@ history.seed(M);updateHistoryUI();requestAnimationFrame(tick);
 
 // KINÉTIKA V11 — percurso amostrado.
 
-// V13 · Assistente de projetos: recomendações locais + IA opcional via Netlify.
+// V15 · Projeto generativo por componentes, validação determinística e distinção explícita IA/biblioteca local.
 let advisorPlan=null,advisorOnline=false,advisorProvider=null,advisorBusy=false;
 function advisorHtml(plan){
- const p=normalizeAdvisorPlan(plan);
- return `<div class="advisor-result-head"><span class="advisor-tag">${p.mode==='ai'?'IA conectada · sugestão':'Biblioteca local · sugestão'}</span><h3>${str(p.title)}</h3><p>${str(p.explanation)}</p></div><div class="advisor-layout"><div><strong>Montagem proposta</strong><ol>${p.steps.map(step=>`<li>${str(step)}</li>`).join('')}</ol></div><div><strong>Restrições e cuidados</strong><ul>${p.warnings.map(w=>`<li>${str(w)}</li>`).join('')}</ul></div></div>${p.template==='none'?'<p class="advisor-note">Esta proposta ainda não tem gerador automático de peças. Utilize as ferramentas da biblioteca.</p>':`<button class="btn primary" id="advisorApply">＋ Adicionar montagem ao projeto atual</button><p class="advisor-note">Apenas modelos prontos e verificados são inseridos. A IA não altera diretamente sua montagem.</p>`}`;
+ const p=normalizeAdvisorPlan(plan),a=p.assembly||{nodes:[],bars:[],gears:[],racks:[],mates:[]};
+ const counts=p.template==='custom'?`<p class="advisor-note"><strong>Montagem original:</strong> ${a.nodes.length} pivôs/apoios · ${a.bars.length} barras · ${a.gears.length} rodas · ${a.racks.length} cremalheiras · ${a.mates.length} transmissões. As medidas são hipóteses iniciais.</p>`:'';
+ const note=p.template==='custom'?'O grafo será validado antes da inserção. Simule e avalie pontos mortos, colisões e graus de liberdade após inserir.':'A inserção usa exclusivamente um exemplo da biblioteca, não uma geometria nova gerada pela IA.';
+ const button=p.template==='none'?'<p class="advisor-note">Sem montagem automática válida para esta ideia. Especifique entradas, saídas e apoios para obter uma proposta mais concreta.</p>':`<button class="btn primary" id="advisorApply">＋ Inserir proposta no projeto</button><p class="advisor-note">${str(note)}</p>`;
+ return `<div class="advisor-result-head"><span class="advisor-tag">${p.mode==='ai'?'◉ IA generativa conectada':'◇ Exemplo local · sem IA'}</span><h3>${str(p.title)}</h3><p>${str(p.explanation)}</p></div>${counts}<div class="advisor-layout"><div><strong>Montagem proposta</strong><ol>${p.steps.map(step=>`<li>${str(step)}</li>`).join('')}</ol></div><div><strong>Restrições e cuidados</strong><ul>${p.warnings.map(w=>`<li>${str(w)}</li>`).join('')}</ul></div></div>${button}`;
 }
 async function advisorStatus(){
  const badge=$('advisorStatus');if(!badge)return;
- badge.textContent='Verificando disponibilidade…';
- try{const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),3500);const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);const data=await res.json();advisorOnline=!!data.available;advisorProvider=advisorOnline?data.provider:null;badge.textContent=advisorOnline?(advisorProvider==='gemini'?'Gemini disponível · código de acesso necessário':'OpenAI disponível · código de acesso necessário'):'Modo local gratuito · sem chave';}catch{advisorOnline=false;advisorProvider=null;badge.textContent='Modo local gratuito · sem chave';}
+ badge.textContent='Verificando disponibilidade do Gemini…';
+ try{
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),4500);
+  const res=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal});clearTimeout(timer);
+  if(!res.ok)throw Error('Serviço indisponível');
+  const data=await res.json();advisorOnline=!!data.available;advisorProvider=advisorOnline?data.provider:null;
+  badge.textContent=advisorOnline?(advisorProvider==='gemini'?'● Gemini online disponível. Informe o código de acesso para gerar uma montagem original.':'● OpenAI online disponível. Informe o código de acesso para gerar uma montagem original.'):'○ IA não configurada no Netlify. Adicione GEMINI_API_KEY e KINETIKA_ASSISTANT_ACCESS_CODE; exemplos locais disponíveis abaixo.';
+ }catch{advisorOnline=false;advisorProvider=null;badge.textContent='○ IA online não respondeu. Utilize a biblioteca local ou verifique as funções do Netlify.';}
  $('advisorAccessRow').hidden=!advisorOnline;
 }
 function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisorResult').innerHTML=advisorHtml(advisorPlan);}
+function advisorError(message){advisorPlan=null;$('advisorResult').innerHTML=`<div class="advisor-empty"><strong>Não foi possível criar uma montagem com IA.</strong><p>${str(message)}</p><p>O projeto não foi alterado. Você pode corrigir a configuração ou usar conscientemente um exemplo da biblioteca local.</p></div>`;}
 async function askAdvisor(){
- if(advisorBusy)return;const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo em uma frase.';return;}
- advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=advisorOnline?'Consultando IA…':'Gerando sugestão local…';
+ if(advisorBusy)return;
+ const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo com pelo menos seis caracteres.';return;}
+ if(!advisorOnline){advisorError('A API do Gemini não está disponível neste site. Configure a chave e o código no Netlify para gerar um mecanismo novo.');$('advisorStatus').textContent='IA indisponível · nenhuma sugestão apresentada como generativa.';return;}
+ const access=$('advisorAccess').value.trim();if(!access){advisorError('Informe o código de acesso ao Gemini configurado no Netlify.');$('advisorAccess').focus();return;}
+ advisorBusy=true;$('advisorAsk').disabled=true;$('advisorStatus').textContent=`Consultando ${advisorProvider==='gemini'?'Gemini':'OpenAI'} para gerar geometria e conexões…`;
  try{
-  if(advisorOnline){const response=await fetch('/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':$('advisorAccess').value},body:JSON.stringify({question,project:modelSummary(M)})});const result=await response.json();if(!response.ok)throw Error(result.error||'Falha na IA.');showAdvisorPlan({...result.plan,mode:'ai'});$('advisorStatus').textContent=(result.provider==='gemini'?'Gemini':'OpenAI')+' · proposta recebida. Confira as restrições antes de inserir.';}
-  else{showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent='Sugestão da biblioteca local; não foi usada IA online.';}
- }catch(err){showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent=`${String(err.message).slice(0,110)} · Usando biblioteca local.`;}
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),34500);
+  let response;
+  try{response=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal,method:'POST',headers:{'content-type':'application/json','x-kinetika-access':access},body:JSON.stringify({question,project:modelSummary(M)})});}finally{clearTimeout(timer)}
+  const result=await response.json();if(!response.ok)throw Error(result.error||`Servidor HTTP ${response.status}`);
+  showAdvisorPlan({...result.plan,mode:'ai'});
+  const a=advisorPlan.assembly;const shape=advisorPlan.template==='custom'?` · ${a.nodes.length} pivôs, ${a.bars.length} barras, ${a.gears.length} rodas`:'';
+  $('advisorStatus').textContent=`● ${result.provider==='gemini'?'Gemini':'OpenAI'} respondeu com uma proposta${shape}. Analise e confirme antes de inserir.`;
+ }catch(err){const msg=err.name==='AbortError'?'Tempo de resposta esgotado.':String(err.message).slice(0,220);advisorError(msg);$('advisorStatus').textContent='IA indisponível · não substituímos a resposta por outro mecanismo.';}
  finally{advisorBusy=false;$('advisorAsk').disabled=false;}
 }
+function localAdvisor(){
+ const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva o movimento para consultar a biblioteca local.';return;}
+ try{showAdvisorPlan(suggestLocalPlan(question));$('advisorStatus').textContent='◇ Exemplo local sem IA. Não é uma proposta gerada pelo Gemini.';}
+ catch(err){advisorError(err.message)}
+}
 function addAdvisorTemplate(){
- if(!advisorPlan||advisorPlan.template==='none')return;const snapshot=JSON.stringify(M);
+ if(!advisorPlan||advisorPlan.template==='none')return;
+ const snapshot=JSON.stringify(M);
  try{
   playing=false;updatePlay();
-  if(advisorPlan.template==='cross_racks'){
-   const maxX=M.nodes.length?Math.max(...M.nodes.map(n=>n.x)):cam.x;
-   const centerX=M.nodes.length?maxX+270:cam.x,centerY=M.nodes.length?(Math.min(...M.nodes.map(n=>n.y))+Math.max(...M.nodes.map(n=>n.y)))/2:cam.y;
-   const made=appendCrossRacks(M,centerX,centerY);solve(120);select('gear',made.gearId);toast('Quatro cremalheiras foram adicionadas. Gire o pinhão e inspecione as interferências 2D.');
-  }else if(advisorPlan.template==='scissor'){createScissor(3,110,140,false);toast('Pantógrafo adicionado, sem apagar o projeto atual.');}
+  const maxX=M.nodes.length?Math.max(...M.nodes.map(n=>n.x)):cam.x;
+  const centerX=M.nodes.length?maxX+270:cam.x,centerY=M.nodes.length?(Math.min(...M.nodes.map(n=>n.y))+Math.max(...M.nodes.map(n=>n.y)))/2:cam.y;
+  if(advisorPlan.template==='custom'){
+   const made=appendCustomAssembly(M,advisorPlan.assembly,centerX,centerY);
+   const residual=solve(180);
+   if(!Number.isFinite(residual)||residual>1)throw Error(`restrições iniciais incompatíveis (residual ${fmt(residual,2)} mm). Revise apoios e medidas.`);
+   const firstGear=made.gears[0],firstBar=made.bars[0];
+   if(firstGear)select('gear',firstGear);else if(firstBar)select('bar',firstBar);
+   toast(`Montagem criada: ${made.bars.length} barras, ${made.gears.length} rodas, ${made.racks.length} cremalheiras. Verifique os limites 2D.`);
+  }else if(advisorPlan.template==='cross_racks'){
+   const made=appendCrossRacks(M,centerX,centerY);solve(120);select('gear',made.gearId);toast('Exemplo em cruz inserido; inspecione as interferências 2D.');
+  }else if(advisorPlan.template==='scissor'){createScissor(3,110,140,false);toast('Exemplo de pantógrafo inserido no projeto atual.');}
   commitChange();$('advisorModal').classList.remove('show');fit();
- }catch(err){M=JSON.parse(snapshot);solve();render();toast('Não foi possível inserir a montagem: '+err.message,true)}
+ }catch(err){M=JSON.parse(snapshot);stablePose=null;solve();render();toast('Montagem rejeitada: '+err.message,true);advisorStatusTextError(err.message)}
 }
+function advisorStatusTextError(message){$('advisorStatus').textContent=`Proposta não inserida: ${String(message).slice(0,130)}`}
 $('advisorBtn').addEventListener('click',()=>{$('advisorModal').classList.add('show');advisorStatus()});
 $('advisorAsk').addEventListener('click',askAdvisor);
+$('advisorLocal').addEventListener('click',localAdvisor);
 $('advisorQuestion').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')askAdvisor()});
 $('advisorResult').addEventListener('click',e=>{if(e.target.closest('#advisorApply'))addAdvisorTemplate()});
-document.querySelectorAll('[data-advisor-prompt]').forEach(button=>button.addEventListener('click',()=>{$('advisorQuestion').value=button.dataset.advisorPrompt;askAdvisor()}));
+document.querySelectorAll('[data-advisor-prompt]').forEach(button=>button.addEventListener('click',()=>{$('advisorQuestion').value=button.dataset.advisorPrompt;localAdvisor()}));

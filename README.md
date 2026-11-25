@@ -56,17 +56,32 @@ A inspeção usa **amostragem temporal discreta** e perfis **2D aproximados**: b
 - **IA online opcional:** função Netlify `/.netlify/functions/mechanical-advisor` usando a API Responses. Para habilitar em Site configuration → Environment variables, configure **OPENAI_API_KEY** e **KINETIKA_ASSISTANT_ACCESS_CODE** (código privado de acesso ao recurso). Opcional: **OPENAI_MODEL**. Nenhuma chave aparece no navegador ou no GitHub. Se não estiver configurada, o assistente avisa que usa somente regras locais. **A API da OpenAI tem custos próprios; o ChatGPT Plus não inclui créditos de API.** A função exige código de acesso; configure proteção adicional/limites de taxa antes de disponibilizar a terceiros.
 - **Cautela:** a transmissão em cruz é uma aproximação cinemática 2D. Quatro cremalheiras tangenciais podem ter interferências entre si no mesmo plano físico; a montagem real poderá exigir diferentes alturas, espaçadores, mancais e guias. A proposta não é validação estrutural.
 
-## V14 · Gemini como provedor principal
+## V14 · Gemini por padrão com biblioteca local gratuita
 
-A biblioteca de propostas locais continua **gratuita e sem chave**. A IA generativa usa **Gemini** por padrão quando configurado. Uma chave gratuita da API do Google sempre pertence a um projeto Google AI Studio (as cotas/eligibilidade variam); não existe chave compartilhada pública e ilimitada segura.
+A função segura de Netlify `/.netlify/functions/mechanical-advisor` oferece respostas estruturadas por **Gemini** como provedor preferencial, sem chave exposta ao navegador. Não existe chave universal gratuita e ilimitada: o nível gratuito da API depende de uma chave vinculada ao projeto do Google AI Studio e da elegibilidade/quota desse projeto.
 
-No Netlify → **Site configuration → Environment variables** configure:
-- `GEMINI_API_KEY` = chave privada existente do seu projeto Google AI Studio (nunca em repositório ou variáveis `VITE_*`).
-- `KINETIKA_ASSISTANT_ACCESS_CODE` = código secreto de acesso para o protótipo privado.
-- `GEMINI_MODEL` = `gemini-3.5-flash-lite` (opcional; pode variar conforme a disponibilidade de seu projeto).
-- `KINETIKA_AI_PROVIDER` = `gemini` ou `openai` (opcional). Sem escolha explícita, Gemini é preferido. **Nunca há fallback automático para OpenAI paga quando Gemini atinge o limite.**
-- `OPENAI_API_KEY` e `OPENAI_MODEL` = opcionais, apenas caso decida usar OpenAI.
+Em **Netlify → Site configuration → Environment variables**, configure:
 
-Após configurar as variáveis, publique outro deploy. A chave não aparece no navegador nem no GET de disponibilidade. Se faltar chave/código, ou a chamada alcançar o limite, o editor recua para as sugestões locais gratuitamente.
+- `GEMINI_API_KEY` = chave existente do seu projeto Google AI Studio (não coloque no GitHub ou em variáveis `VITE_*`).
+- `KINETIKA_ASSISTANT_ACCESS_CODE` = senha longa privada, exigida de quem solicitar IA online. Não distribua o código em sites públicos.
+- Opcional: `GEMINI_MODEL` = `gemini-3.5-flash-lite` (padrão; altere de acordo com modelos habilitados para seu projeto).
+- Opcional: `KINETIKA_AI_PROVIDER` = `gemini` ou `openai`; sem ela, Gemini tem preferência sempre que configurado. A OpenAI **não é acionada automaticamente** se o Gemini esgotar a cota.
+- Opcional: `OPENAI_API_KEY` e `OPENAI_MODEL` apenas para usar OpenAI deliberadamente.
 
-**Produção pública:** um código compartilhado não é autenticação robusta e não impede uso abusivo se vazar. Antes de liberar amplamente, implementar login individual, cotas por usuário, limitação de taxa distribuída e monitoramento de custos.
+Depois de definir variáveis, faça novo deploy para aplicá-las. O endpoint GET indica somente disponibilidade e provedor, sem revelar nenhum segredo. Se faltar chave/código, se a cota acabar ou se houver erro de permissão, o botão mantém as propostas **locais gratuitas e sem IA online**; nenhuma API paga é acionada automaticamente.
+
+**Atenção para divulgação pública:** um código compartilhado simples não fornece autenticação por usuário nem limites de consumo robustos. Antes de abrir o serviço a terceiros, implemente login, limitação de taxa distribuída, observabilidade e teto de uso. A franquia gratuita depende da elegibilidade do projeto e pode variar.
+
+
+## V15 · Propostas generativas (correção de repetição dos exemplos)
+
+**Causa corrigida:** nas versões anteriores o endpoint de IA forçava `cross_racks`, `scissor` ou `none`; a interface só inseria dois exemplos, e o classificador local ativava `cross_racks` até para objetivos vagos como "expandir". Essa limitação foi removida.
+
+- **Gerar com IA:** usa o Gemini no servidor Netlify para propor um **grafo original** de pivôs, apoios, guias, barras rígidas, engrenagens e cremalheiras, com posições iniciais e conexões declarativas. As chaves não são transmitidas ao navegador.
+- **Biblioteca local:** é um botão separado, explicitamente identificado como exemplo sem IA. Biela–manivela pode ser inserida diretamente; expansão em cruz só aparece quando o texto pede claramente cruz/quatro braços/quatro direções. Uma ideia genérica não é transformada automaticamente em cruz.
+- **Inserção controlada:** o grafo de saída é validado quanto a limites de quantidade, referências, faixas dimensionais, tipos de peças e incompatibilidades óbvias. As entidades são adicionadas ao projeto atual apenas após confirmação; erro de resolução cancela a operação e preserva o projeto anterior.
+- **Sem substituição silenciosa:** falhas do Gemini, falta de credenciais ou código inválido geram mensagem específica, e não uma resposta de aparência generativa com o template local. Nunca há ativação automática da OpenAI paga; `KINETIKA_AI_PROVIDER=openai` é necessário para habilitá-la.
+- **Configuração:** Netlify → Environment variables → `GEMINI_API_KEY`, `KINETIKA_ASSISTANT_ACCESS_CODE` e, se necessário, `GEMINI_MODEL` com ID disponível para o seu projeto. Após configurar, faça um novo deploy. A rota GET `/.netlify/functions/mechanical-advisor` indica `available:true` quando há configuração suficiente, mas **não prova** que a chave/modelo têm acesso válido antes de uma consulta real.
+- **Limites explícitos:** a montagem gerada é um **rascunho cinemático 2D**; solver local não valida resistência, fabricação, colisões tridimensionais ou curso completo. O conjunto de componentes geráveis é limitado aos tipos atualmente suportados; propostas complexas podem ser rejeitadas em vez de deformadas para caber no exemplo.
+
+Rode `npm run check && npm test && npm run build` na CI. Testes V15 incluem diferenças topológicas, transmissão, rejeição de modelos malformados e API Gemini simulada com novo `assembly` declarativo.

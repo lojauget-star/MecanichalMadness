@@ -1,31 +1,53 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import handler from '../netlify/functions/mechanical-advisor.mjs';
-const url='https://kinetika.test/.netlify/functions/mechanical-advisor';
-const question=()=>new Request(url,{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':'private'},body:JSON.stringify({question:'Quero expandir quatro braços na forma de cruz'})});
-const plan={title:'Cruz',explanation:'Pinhão e quatro cremalheiras',steps:['Montar o pinhão'],warnings:['Verifique planos distintos'],template:'cross_racks'};
-async function scoped(vars,fn){
- const keys=['GEMINI_API_KEY','OPENAI_API_KEY','KINETIKA_ASSISTANT_ACCESS_CODE','KINETIKA_AI_PROVIDER','GEMINI_MODEL'];
- const saved=Object.fromEntries(keys.map(k=>[k,process.env[k]])),originalFetch=globalThis.fetch;
- for(const k of keys)delete process.env[k];
- Object.assign(process.env,vars);
- try{await fn()}finally{for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k]}globalThis.fetch=originalFetch}
+import handler,{selectedProvider} from '../netlify/functions/mechanical-advisor.mjs';
+const endpoint='https://test.example/.netlify/functions/mechanical-advisor';
+const request=(code='secret')=>new Request(endpoint,{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':code},body:JSON.stringify({question:'Quero abrir quatro braços em forma de cruz',project:{nodes:12,bars:4,gears:1,racks:4}})});
+const mockPlan={title:'Expansão em cruz',explanation:'Pinhão central com guias.',steps:['Gire o pinhão','Verifique curso'],warnings:['Evite colisões'],template:'cross_racks'};
+async function withEnvironment(env,run){
+ const keys=['GEMINI_API_KEY','OPENAI_API_KEY','KINETIKA_ASSISTANT_ACCESS_CODE','GEMINI_MODEL','KINETIKA_AI_PROVIDER'];
+ const old=Object.fromEntries(keys.map(k=>[k,process.env[k]])),oldFetch=globalThis.fetch;
+ for(const key of keys)delete process.env[key];
+ Object.assign(process.env,env);
+ try{return await run()}finally{for(const k of keys){if(old[k]===undefined)delete process.env[k];else process.env[k]=old[k]}globalThis.fetch=oldFetch}
 }
-test('sem projeto com chave e código: modo local sem custo',()=>scoped({},async()=>{const r=await handler(new Request(url));assert.deepEqual(await r.json(),{available:false,provider:null,mode:'local'})}));
-test('Gemini é preferido mesmo com OpenAI presente',()=>scoped({GEMINI_API_KEY:'google-secret',OPENAI_API_KEY:'paid-key',KINETIKA_ASSISTANT_ACCESS_CODE:'private'},async()=>{
- const calls=[];globalThis.fetch=async(u,opt)=>{calls.push({u,opt});return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(plan)}]}}]}),{status:200})};
- let r=await handler(new Request(url));assert.deepEqual(await r.json(),{available:true,provider:'gemini',mode:'online'});
- r=await handler(question());assert.equal(r.status,200);const d=await r.json();assert.equal(d.provider,'gemini');assert.equal(d.plan.template,'cross_racks');
- assert.equal(calls.length,1);assert.match(calls[0].u,/generativelanguage.googleapis.com/);assert.equal(calls[0].opt.headers['x-goog-api-key'],'google-secret');
- assert.ok(!JSON.stringify(d).includes('google-secret'));
- const config=JSON.parse(calls[0].opt.body).generationConfig;assert.equal(config.responseMimeType,'application/json');
+test('sem chave ou código funciona apenas a biblioteca local',()=>withEnvironment({},async()=>{
+ const get=await handler(new Request(endpoint));assert.deepEqual(await get.json(),{available:false,provider:null,mode:'local'});
+ const post=await handler(request());assert.equal(post.status,503);
 }));
-test('limite 429 do Gemini não transfere cobrança à OpenAI',()=>scoped({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o',KINETIKA_ASSISTANT_ACCESS_CODE:'private'},async()=>{
- const urls=[];globalThis.fetch=async u=>{urls.push(u);return new Response('',{status:429})};
- const r=await handler(question());assert.equal(r.status,429);assert.equal(urls.length,1);assert.match(urls[0],/googleapis/);
+test('chaves Gemini e OpenAI: Gemini é selecionado primeiro, sem custos OpenAI imprevistos',()=>{
+ assert.equal(selectedProvider({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o'}),'gemini');
+ assert.equal(selectedProvider({OPENAI_API_KEY:'o'}),null);
+ assert.equal(selectedProvider({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o',KINETIKA_AI_PROVIDER:'openai'}),'openai');
+ assert.equal(selectedProvider({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o',KINETIKA_AI_PROVIDER:'gemini'}),'gemini');
+ assert.equal(selectedProvider({OPENAI_API_KEY:'o',KINETIKA_AI_PROVIDER:'gemini'}),null);
+});
+test('Gemini usa endpoint oficial com chave somente no servidor e devolve plano validado',()=>withEnvironment({GEMINI_API_KEY:'my-private-key',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ const requests=[];
+ globalThis.fetch=async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(mockPlan)}]}}]}),{status:200,headers:{'content-type':'application/json'}})};
+ const ready=await handler(new Request(endpoint));assert.deepEqual(await ready.json(),{available:true,provider:'gemini',mode:'online'});
+ const response=await handler(request());assert.equal(response.status,200);
+ const data=await response.json();assert.equal(data.mode,'ai');assert.equal(data.provider,'gemini');assert.equal(data.plan.template,'cross_racks');
+ assert.equal(requests.length,1);assert.match(requests[0].url,/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent/);
+ assert.equal(requests[0].options.headers['x-goog-api-key'],'my-private-key');
+ const payload=JSON.parse(requests[0].options.body);assert.equal(payload.generationConfig.responseMimeType,'application/json');
+ assert.equal(payload.generationConfig.responseSchema.properties.template.type,'string');
+ assert.ok(!JSON.stringify(data).includes('my-private-key'));
 }));
-test('senha incorreta bloqueia qualquer chamada externa',()=>scoped({GEMINI_API_KEY:'g',KINETIKA_ASSISTANT_ACCESS_CODE:'private'},async()=>{
- globalThis.fetch=()=>{throw Error('não deve chamar')};
- const req=new Request(url,{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':'wrong'},body:JSON.stringify({question:'Expandir quatro braços'})});
- assert.equal((await handler(req)).status,401);
+test('código incorreto impede a chamada externa',()=>withEnvironment({GEMINI_API_KEY:'g',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ globalThis.fetch=()=>{throw Error('Não deveria chamar')};
+ const response=await handler(request('wrong'));assert.equal(response.status,401);
+}));
+test('cota do Gemini esgotada não aciona automaticamente OpenAI',()=>withEnvironment({GEMINI_API_KEY:'g',OPENAI_API_KEY:'pay-key',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ const urls=[];globalThis.fetch=async(url)=>{urls.push(url);return new Response(JSON.stringify({error:{message:'quota'}}),{status:429})};
+ const result=await handler(request());assert.equal(result.status,429);assert.equal((await result.json()).provider,'gemini');
+ assert.equal(urls.length,1);assert.match(urls[0],/googleapis/);
+}));
+test('modelo Gemini inválido bloqueia URL e consulta externa',()=>withEnvironment({GEMINI_API_KEY:'g',KINETIKA_ASSISTANT_ACCESS_CODE:'secret',GEMINI_MODEL:'https://malicious.example'},async()=>{
+ globalThis.fetch=()=>{throw Error('Não deveria chamar')};
+ const result=await handler(request());assert.equal(result.status,502);
+}));
+test('modelo OpenAI só é escolhido sob configuração explícita',()=>withEnvironment({GEMINI_API_KEY:'g',OPENAI_API_KEY:'o',KINETIKA_ASSISTANT_ACCESS_CODE:'secret',KINETIKA_AI_PROVIDER:'openai'},async()=>{
+ let url;globalThis.fetch=async(u)=>{url=u;return new Response(JSON.stringify({output:[{content:[{type:'output_text',text:JSON.stringify(mockPlan)}]}]}),{status:200})};
+ const response=await handler(request());assert.equal(response.status,200);assert.equal((await response.json()).provider,'openai');assert.match(url,/api\.openai\.com/);
 }));

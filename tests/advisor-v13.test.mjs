@@ -9,7 +9,7 @@ test('expansão em cruz é reconhecida sem depender de IA online',()=>{
 });
 test('proposta de pantógrafo e biela distingue opções fabricáveis',()=>{
   assert.equal(suggestLocalPlan('levantar uma plataforma com pantografo').template,'scissor');
-  assert.equal(suggestLocalPlan('converter rotacao em pistao usando biela').template,'none');
+  assert.equal(suggestLocalPlan('converter rotacao em pistao usando biela').template,'custom');
 });
 test('inserção em cruz preserva peças preexistentes, orienta 4 cremalheiras e partilha um pinhão',()=>{
   const m=blank();m.nodes.push({id:'n0',x:500,y:500,fixed:true});m.next=1;
@@ -36,12 +36,12 @@ test('endpoint do Netlify retorna indisponível sem chaves e não chama API exte
   }finally{if(oldKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=oldKey;if(oldAccess===undefined)delete process.env.KINETIKA_ASSISTANT_ACCESS_CODE;else process.env.KINETIKA_ASSISTANT_ACCESS_CODE=oldAccess}
 });
 test('endpoint com chave exige código de acesso',async()=>{
-  const key=process.env.OPENAI_API_KEY,access=process.env.KINETIKA_ASSISTANT_ACCESS_CODE;
-  process.env.OPENAI_API_KEY='test-secret';process.env.KINETIKA_ASSISTANT_ACCESS_CODE='only-admin';
+  const key=process.env.GEMINI_API_KEY,access=process.env.KINETIKA_ASSISTANT_ACCESS_CODE;
+  process.env.GEMINI_API_KEY='test-secret';process.env.KINETIKA_ASSISTANT_ACCESS_CODE='only-admin';
   try{
     const r=await handler(new Request('https://test/.netlify/functions/mechanical-advisor',{method:'POST',headers:{'content-type':'application/json','x-kinetika-access':'incorrect'},body:JSON.stringify({question:'Expansão em cruz'})}));
     assert.equal(r.status,401);
-  }finally{if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;if(access===undefined)delete process.env.KINETIKA_ASSISTANT_ACCESS_CODE;else process.env.KINETIKA_ASSISTANT_ACCESS_CODE=access}
+  }finally{if(key===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=key;if(access===undefined)delete process.env.KINETIKA_ASSISTANT_ACCESS_CODE;else process.env.KINETIKA_ASSISTANT_ACCESS_CODE=access}
 });
 test('um pinhão desloca quatro cremalheiras em pares opostos no mesmo modelo',async()=>{
  const {solveConstraints}=await import('../src/solver.js');

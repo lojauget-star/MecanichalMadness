@@ -1,9 +1,10 @@
 /** KINÉTIKA: propostas locais verificáveis. Não são inferências de IA. */
-export const TEMPLATE_IDS = Object.freeze(['cross_racks', 'scissor', 'none']);
+import {emptyAssembly,validateCustomAssembly} from './assembly-builder.js';
+export const TEMPLATE_IDS = Object.freeze(['cross_racks', 'scissor', 'custom', 'none']);
 const lower = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 export function suggestLocalPlan(question) {
   const text = lower(question);
-  if (/(cruz|quatro direc|4 direc|radial|expand|abri.*lado|retratil)/.test(text)) {
+  if (/(cruz|quatro direc|4 direc|quatro brac|4 brac|quatro cremalheir|4 cremalheir)/.test(text)) {
     return {
       template: 'cross_racks', title: 'Expansão em quatro direções',
       explanation: 'Um pinhão central transmite sua rotação a quatro cremalheiras tangentes, orientadas em dois eixos perpendiculares. Um mesmo ângulo do pinhão produz quatro movimentos lineares coordenados.',
@@ -12,11 +13,11 @@ export function suggestLocalPlan(question) {
       mode: 'local'
     };
   }
-  if (/(pantograf|tesoura|elev|levanta|altura|plataforma|sanfona)/.test(text)) {
+  if (/(pantograf|tesoura|sanfona)/.test(text)) {
     return {template:'scissor',title:'Elevação por pantógrafo',explanation:'Um conjunto de barras cruzadas com pivôs centrais permite variar altura e largura por um curso de entrada. A implantação requer apoios e guias coerentes.',steps:['Adicionar três estágios de tesoura ao projeto.', 'Definir qual apoio ficará fixo e qual extremidade será deslizante.', 'Aplicar movimento a um ponto guiado.', 'Inspecionar singularidades nas posições quase fechada e quase aberta.'],warnings:['Pantógrafos colapsados podem alcançar singularidades; não inferir força ou estabilidade estrutural pela animação.'],mode:'local'};
   }
   if (/(biela|pistao|piston|manivela|alternad|reciproc)/.test(text)) {
-    return {template:'none',title:'Biela–manivela',explanation:'Uma manivela giratória, ligada a uma biela de comprimento fixo e a um cursor prismático, converte rotação em translação alternada.',steps:['Criar um eixo fixo e uma manivela.', 'Conectar a extremidade a uma biela rígida.', 'Criar uma guia linear e ligar o cursor à biela.', 'Escolher o eixo de entrada e examinar os pontos mortos.'],warnings:['Ainda não há inserção automática desta montagem na biblioteca de propostas. Monte com as ferramentas existentes ou use o exemplo Biela–manivela.'],mode:'local'};
+    return {template:'custom',title:'Mecanismo biela–manivela (biblioteca local)',explanation:'Uma barra em rotação transmite deslocamento alternado a um cursor. O desenho é um exemplo parametrizável, não uma montagem calculada para seu produto.',steps:['Criar um apoio fixo, dois pivôs móveis e uma guia horizontal.', 'Conectar o apoio à manivela e a manivela à biela.', 'Mover manualmente a manivela e observar o cursor.', 'Ajustar as dimensões, verificando pontos mortos e interferências.'],warnings:['Exemplo local predefinido, sem consulta à IA.', 'A montagem pode exigir ajustes de posição e comprimento para cumprir o curso desejado.'],mode:'local',assembly:{nodes:[{id:'A',x:0,y:0,fixed:true,sliderAngle:0,sliderRange:0},{id:'B',x:45,y:55,fixed:false,sliderAngle:0,sliderRange:0},{id:'C',x:165,y:0,fixed:false,sliderAngle:0,sliderRange:320}],bars:[{a:'A',b:'B'},{a:'B',b:'C'}],gears:[],racks:[],mates:[]}};
   }
   return {template:'none',title:'Estudo da ideia',explanation:'Para selecionar uma transmissão é necessário definir o movimento de entrada e o de saída, o curso aproximado e quais pontos permanecem fixos.',steps:['Descrever o objetivo em termos de movimento (girar, deslizar, elevar ou expandir).', 'Informar o número de saídas e a direção de cada uma.', 'Experimentar uma transmissão simples primeiro e acoplar novos mecanismos progressivamente.'],warnings:['Esta é uma orientação local baseada em regras, não uma resposta de modelo de IA.'],mode:'local'};
 }
@@ -43,5 +44,5 @@ export function normalizeAdvisorPlan(raw) {
  const p=(raw&&typeof raw==='object')?raw:{};
  const template=TEMPLATE_IDS.includes(p.template)?p.template:'none';
  const asText=(s,max=1200)=>String(s??'').slice(0,max);
- return {mode:p.mode==='ai'?'ai':'local',template,title:asText(p.title,120),explanation:asText(p.explanation,1100),steps:(Array.isArray(p.steps)?p.steps:[]).slice(0,6).map(x=>asText(x,250)),warnings:(Array.isArray(p.warnings)?p.warnings:[]).slice(0,4).map(x=>asText(x,260))};
+ return {mode:p.mode==='ai'?'ai':'local',template,title:asText(p.title,120),explanation:asText(p.explanation,1100),steps:(Array.isArray(p.steps)?p.steps:[]).slice(0,6).map(x=>asText(x,250)),warnings:(Array.isArray(p.warnings)?p.warnings:[]).slice(0,4).map(x=>asText(x,260)),assembly:template==='custom'?validateCustomAssembly(p.assembly):emptyAssembly()};
 }
