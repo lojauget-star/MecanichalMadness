@@ -102,3 +102,7 @@ A configuração do Netlify deve incluir o escopo **Functions**, o contexto **Pr
 ## V17 · Correção HTTP 400 Gemini
 
 O GET `diagnostic:ready` apenas confirma que as variáveis foram reconhecidas; não testa a API do Google. A função agora usa `generationConfig.responseJsonSchema`, que aceita JSON Schema, em vez de `responseSchema`, que usa o dialeto Gemini mais restrito. Em HTTP 400 (exceto chave explicitamente inválida), há uma segunda tentativa com `responseMimeType: application/json` sem esquema, validada integralmente no servidor antes de inserir qualquer peça. Falhas devolvem `diagnostic` e `providerStatus` sem divulgar API keys, prompts, respostas ou erros crus do provedor. HTTP 429/5xx não acionam OpenAI paga nem inserem automaticamente templates locais. Depois de publicar, atualize a página e tente novamente com o mesmo código de acesso.
+
+## V18 · HTTP 402 (saldo Prepay / faturamento)
+
+O erro 402 do Google indica bloqueio de faturamento ou saldo Prepay esgotado na Gemini API. A API retorna `diagnostic: billing_required` e `providerStatus: 402`; o editor exibe um link para https://aistudio.google.com/billing. Nesse erro, não é feita nova tentativa, troca de modelo ou fallback para OpenAI paga. O `diagnostic: ready` do GET só comprova presença de variáveis e não verifica saldo/créditos. Caso prefira não pagar, use a biblioteca local ou uma chave de projeto efetivamente elegível ao nível gratuito. Não compartilhe sua chave nem código de acesso.

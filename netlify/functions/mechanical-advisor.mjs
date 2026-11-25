@@ -65,14 +65,15 @@ async function geminiPlan(prompt,signal,env){
  if(response.httpStatus){
   const status=response.httpStatus;
   const invalidKey=/API_KEY_INVALID|API_KEY_EXPIRED|api key not valid|key expired/i.test(response.googleMessage);
-  const msg=status===429?'Cota do Gemini atingida. Nenhum modelo pago será usado automaticamente.':
+  const msg=status===402?'A API do Google bloqueou a geração (HTTP 402): saldo Prepay esgotado ou condição de faturamento pendente. Consulte https://aistudio.google.com/billing. Não será acionada nenhuma API paga automaticamente.':
+   status===429?'Cota do Gemini atingida. Nenhum modelo pago será usado automaticamente.':
    invalidKey?'O Google recusou a chave Gemini; confira a chave no Google AI Studio.':
    [401,403].includes(status)?'A chave Gemini não tem permissão para esta chamada (HTTP '+status+').':
    status===404?'O modelo '+model+' não está disponível para este projeto. Revise GEMINI_MODEL.':
    status===400?'O Google rejeitou a requisição (HTTP 400), mesmo no modo JSON simplificado. Consulte os logs de Functions do Netlify.':
    status>=500?'O Google retornou erro temporário (HTTP '+status+'). Tente novamente.':
    'A API do Google retornou HTTP '+status+'. Consulte os logs de Functions.';
-  return {error:msg,status:status===429?429:502,providerStatus:status,diagnostic:invalidKey?'invalid_api_key':status===400?'gemini_bad_request':status===404?'model_unavailable':status===429?'quota_exceeded':status>=500?'provider_server_error':'provider_http_error'};
+  return {error:msg,status:status===429?429:502,providerStatus:status,diagnostic:invalidKey?'invalid_api_key':status===402?'billing_required':status===400?'gemini_bad_request':status===404?'model_unavailable':status===429?'quota_exceeded':status>=500?'provider_server_error':'provider_http_error'};
  }
  if(!response.answer)return {error:response.finishReason==='MAX_TOKENS'?'O Gemini esgotou o limite de tokens antes de concluir a montagem.':'O Gemini não retornou texto de proposta.',status:502,diagnostic:'empty_ai_response'};
  try{
@@ -120,7 +121,7 @@ export default async function handler(request){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),29000);
  try{
   const output=provider==='gemini'?await geminiPlan(prompt,controller.signal,env):await openaiPlan(prompt,controller.signal,env);
-  if(output.error)return json({error:output.error,provider,diagnostic:output.diagnostic||'ai_request_failed',providerStatus:output.providerStatus||null},output.status===429?429:502);
+  if(output.error)return json({error:output.error,provider,diagnostic:output.diagnostic||'ai_request_failed',providerStatus:output.providerStatus||null},output.status===429?429:output.providerStatus===402?402:502);
   return json({mode:'ai',provider,plan:output.plan});
  }catch{return json({error:'A IA não conseguiu fornecer uma montagem estruturada válida. Confira o modelo e tente reformular o objetivo; a biblioteca local permanece disponível.',provider},502)}
  finally{clearTimeout(timer)}

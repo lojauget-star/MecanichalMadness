@@ -1331,7 +1331,7 @@ async function advisorStatus(){
  $('advisorAccessRow').hidden=!advisorOnline;
 }
 function showAdvisorPlan(plan){advisorPlan=normalizeAdvisorPlan(plan);$('advisorResult').innerHTML=advisorHtml(advisorPlan);}
-function advisorError(message){advisorPlan=null;$('advisorResult').innerHTML=`<div class="advisor-empty"><strong>Não foi possível criar uma montagem com IA.</strong><p>${str(message)}</p><p>O projeto não foi alterado. Você pode corrigir a configuração ou usar conscientemente um exemplo da biblioteca local.</p></div>`;}
+function advisorError(message,diagnostic=''){advisorPlan=null;const billing=diagnostic==='billing_required'?'<p><a href="https://aistudio.google.com/billing" target="_blank" rel="noopener noreferrer">Verificar faturamento no Google AI Studio</a>. A franquia gratuita depende da elegibilidade do projeto; não é possível contornar um bloqueio de cobrança modificando o modelo.</p>':'';$('advisorResult').innerHTML=`<div class="advisor-empty"><strong>Não foi possível criar uma montagem com IA.</strong><p>${str(message)}</p>${billing}<p>O projeto não foi alterado. A biblioteca local continua disponível sem API externa.</p></div>`;}
 async function askAdvisor(){
  if(advisorBusy)return;
  const question=$('advisorQuestion').value.trim();if(question.length<6){$('advisorStatus').textContent='Descreva seu objetivo com pelo menos seis caracteres.';return;}
@@ -1342,11 +1342,11 @@ async function askAdvisor(){
   const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),34500);
   let response;
   try{response=await fetch('/.netlify/functions/mechanical-advisor',{signal:ctrl.signal,method:'POST',headers:{'content-type':'application/json','x-kinetika-access':access},body:JSON.stringify({question,project:modelSummary(M)})});}finally{clearTimeout(timer)}
-  const result=await response.json();if(!response.ok)throw Error(result.error||`Servidor HTTP ${response.status}`);
+  const result=await response.json();if(!response.ok){const error=Error(result.error||`Servidor HTTP ${response.status}`);error.diagnostic=result.diagnostic||'';throw error;}
   showAdvisorPlan({...result.plan,mode:'ai'});
   const a=advisorPlan.assembly;const shape=advisorPlan.template==='custom'?` · ${a.nodes.length} pivôs, ${a.bars.length} barras, ${a.gears.length} rodas`:'';
   $('advisorStatus').textContent=`● ${result.provider==='gemini'?'Gemini':'OpenAI'} respondeu com uma proposta${shape}. Analise e confirme antes de inserir.`;
- }catch(err){const msg=err.name==='AbortError'?'Tempo de resposta esgotado.':String(err.message).slice(0,220);advisorError(msg);$('advisorStatus').textContent='IA indisponível · não substituímos a resposta por outro mecanismo.';}
+ }catch(err){const msg=err.name==='AbortError'?'Tempo de resposta esgotado.':String(err.message).slice(0,380);advisorError(msg,err.diagnostic);$('advisorStatus').textContent=err.diagnostic==='billing_required'?'Gemini bloqueado por faturamento · HTTP 402. Verifique o Google AI Studio.':'IA indisponível · não substituímos a resposta por outro mecanismo.';}
  finally{advisorBusy=false;$('advisorAsk').disabled=false;}
 }
 function localAdvisor(){

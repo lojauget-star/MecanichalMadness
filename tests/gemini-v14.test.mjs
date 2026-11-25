@@ -79,3 +79,18 @@ test('HTTP 503 do Gemini informa falha do provedor sem cobrança em outro proved
  const res=await handler(request()),data=await res.json();
  assert.equal(res.status,502);assert.equal(data.providerStatus,503);assert.equal(data.diagnostic,'provider_server_error');assert.equal(calls,1);
 }));
+
+test('HTTP 402 indica pagamento pendente, não repete chamada nem ativa OpenAI',()=>withEnvironment({GEMINI_API_KEY:'private-key',OPENAI_API_KEY:'paid-key',KINETIKA_ASSISTANT_ACCESS_CODE:'secret'},async()=>{
+ const called=[];
+ globalThis.fetch=async url=>{called.push(url);return new Response(JSON.stringify({error:{code:402,status:'PAYMENT_REQUIRED',message:'Prepay credit balance exhausted'}}),{status:402})};
+ const result=await handler(request());
+ assert.equal(result.status,402);
+ const data=await result.json();
+ assert.equal(data.diagnostic,'billing_required');
+ assert.equal(data.providerStatus,402);
+ assert.equal(data.provider,'gemini');
+ assert.match(data.error,/faturamento|Prepay/i);
+ assert.equal(called.length,1);
+ assert.ok(called.every(u=>u.includes('generativelanguage.googleapis.com')));
+ assert.ok(!JSON.stringify(data).includes('private-key'));
+}));
