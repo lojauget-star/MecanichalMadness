@@ -46,6 +46,21 @@ export function solveConstraints(M, options={}) {
    for(const n of nodes){if(!n.follower)continue;const f=n.follower,g=gmap.get(f.gear);if(!g||!validNode(g.node))continue;const a=gearAngle(x,g.id),cs=Math.cos(a),sn=Math.sin(a),p=pos(x,n.id),c=pos(x,g.node);
       add(`Excêntrico ${n.id} x`,p.x-c.x-f.rx*cs+f.ry*sn,[[`${n.id}.x`,1],[`${g.node}.x`,-1],[`${g.id}.angle`,f.rx*sn+f.ry*cs]]);
       add(`Excêntrico ${n.id} y`,p.y-c.y-f.rx*sn-f.ry*cs,[[`${n.id}.y`,1],[`${g.node}.y`,-1],[`${g.id}.angle`,-f.rx*cs+f.ry*sn]])}
+   // Novos pivôs internos são restrições rígidas sobre uma barra ou cremalheira.
+   // Não separam fisicamente a barra em dois elos articulados.
+   for(const n of nodes){const f=n.follower;if(!f)continue;
+     if(f.bar){
+       const b=bars.find(b=>b.id===f.bar);if(!b||!validNode(b.a)||!validNode(b.b))continue;
+       const t=clamp(Number(f.ratio)||0,.001,.999),a=pos(x,b.a),z=pos(x,b.b),p=pos(x,n.id);
+       add(`Pivô/barra ${n.id} x`,p.x-(1-t)*a.x-t*z.x,[[`${n.id}.x`,1],[`${b.a}.x`,t-1],[`${b.b}.x`,-t]]);
+       add(`Pivô/barra ${n.id} y`,p.y-(1-t)*a.y-t*z.y,[[`${n.id}.y`,1],[`${b.a}.y`,t-1],[`${b.b}.y`,-t]]);
+     }else if(f.rack){
+       const r=rmap.get(f.rack),base=r&&nmap.get(r.node);if(!base?.slider)continue;
+       const u=axe(base.slider),p=pos(x,n.id),c=pos(x,r.node),offset=Number(f.offset)||0;
+       add(`Pivô/cremalheira ${n.id} x`,p.x-c.x-offset*u.ux,[[`${n.id}.x`,1],[`${r.node}.x`,-1]]);
+       add(`Pivô/cremalheira ${n.id} y`,p.y-c.y-offset*u.uy,[[`${n.id}.y`,1],[`${r.node}.y`,-1]]);
+     }
+   }
    for(const m of M.mates||[]){const a=gmap.get(m.a),b=gmap.get(m.b);if(!a||!b)continue;const sign=m.type==='gear'?-1:1,k=sign*a.radius/b.radius;
      add(`Transmissão ${m.id}`,gearAngle(x,b.id)-k*gearAngle(x,a.id)-(m.phase||0),[[`${b.id}.angle`,1],[`${a.id}.angle`,-k]],Math.max(15,Math.min(60,b.radius)));
      if(m.type==='gear'&&validNode(a.node)&&validNode(b.node)){

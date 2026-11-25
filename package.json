@@ -1,13 +1,13 @@
 {
   "name": "kinetika-mechanical-atelier",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "node --check src/main.js && node --check src/diagnostics.js && node --check src/history.js && node --check src/solver.js && node --check src/geometry.js && node --check src/links.js && node --check src/sweep.js && node --check src/design-assistant.js && node --check src/assembly-builder.js && node --check netlify/functions/mechanical-advisor.mjs && node --check src/functional-design.js",
+    "check": "node --check src/main.js && node --check src/diagnostics.js && node --check src/history.js && node --check src/solver.js && node --check src/geometry.js && node --check src/links.js && node --check src/sweep.js && node --check src/design-assistant.js && node --check src/assembly-builder.js && node --check netlify/functions/mechanical-advisor.mjs && node --check src/functional-design.js && node --check src/attached-pivot.js",
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {

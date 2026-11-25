@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f6f5f1">
-<title>KINÉTIKA — Mechanical Atelier · V13</title>
+<title>KINÉTIKA — Mechanical Atelier · V21</title>
 <meta name="description" content="Ateliê de engenharia cinemática. Crie, conecte e simule barras, engrenagens, cremalheiras, polias e pantógrafos diretamente no navegador.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -27,6 +27,7 @@
     <button class="btn" id="exportBtn" title="Exportar projeto JSON">↓ <span class="hide-small">Salvar</span></button>
     <button class="btn" id="importBtn" title="Importar projeto JSON">↑ <span class="hide-small">Abrir</span></button>
     <button class="btn mini" id="helpBtn" title="Como usar">?</button>
+    <button class="btn mini mobile-panels" id="paletteToggle" title="Mostrar todas as ferramentas" aria-label="Mostrar grade de ferramentas" aria-controls="palette" aria-expanded="false">▦</button>
     <button class="btn mini mobile-panels" id="inspectorToggle" title="Propriedades">☷</button>
   </div>
 </header>
@@ -37,6 +38,7 @@
   <button class="tool" data-tool="rotate"><span class="tool-symbol">⤾</span><span><span class="tool-name">Rotacionar elemento</span><div class="tool-sub">Gire barras, cremalheiras e rodas</div></span><span class="tool-short">R</span></button>
   <button class="tool" data-tool="joint"><span class="tool-symbol">◉</span><span><span class="tool-name">Unir pontos</span><div class="tool-sub">Encaixar portas mecânicas com 2 toques</div></span><span class="tool-short">J</span></button>
   <button class="tool" data-tool="unlink"><span class="tool-symbol">◎</span><span><span class="tool-name">Desunir junta</span><div class="tool-sub">Soltar um vínculo sem excluir peças</div></span><span class="tool-short">U</span></button>
+  <button class="tool" data-tool="hinge" title="Criar articulação diretamente em barra, cremalheira ou roda — H"><span class="tool-symbol">⊕</span><span><span class="tool-name">Pivô na peça</span><div class="tool-sub">Articular em um ponto escolhido da peça</div></span><span class="tool-short">H</span></button>
   <button class="tool" data-tool="node"><span class="tool-symbol">○</span><span><span class="tool-name">Pivô livre</span><div class="tool-sub">Ponto com 2 graus de liberdade</div></span><span class="tool-short">P</span></button>
   <button class="tool" data-tool="fixed"><span class="tool-symbol">⌂</span><span><span class="tool-name">Apoio fixo</span><div class="tool-sub">Articulação presa ao solo</div></span><span class="tool-short">F</span></button>
   <button class="tool" data-tool="bar"><span class="tool-symbol">━</span><span><span class="tool-name">Barra rígida</span><div class="tool-sub">Clique em dois pivôs</div></span><span class="tool-short">B</span></button>

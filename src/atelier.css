@@ -302,3 +302,30 @@ button:disabled{opacity:.38;cursor:not-allowed;box-shadow:none!important;transfo
 #advisorChars{flex-shrink:0;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 #advisorChars.advisor-count-near{color:#a76a30}
 @media(max-width:600px){#advisorQuestion{min-height:154px;max-height:36vh}.advisor-prompt-info{flex-wrap:wrap}}
+
+/* V21 · Paleta de ferramentas visíveis numa grade contida, sem catálogo comprido. */
+@media(min-width:701px){
+ .left{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-content:start;gap:5px 4px;padding:12px 9px;overflow-y:auto}
+ .left .section-title{grid-column:1/-1;margin:8px 2px 0;font-size:9px;line-height:1.4;letter-spacing:.12em}
+ .left .section-title:first-child{margin-top:0}
+ .left .tool{min-width:0;min-height:64px;max-height:80px;margin:0;padding:7px 3px 5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:10px;position:relative}
+ .left .tool:hover{transform:none}
+ .left .tool-symbol{flex:0 0 26px;width:27px;height:26px;font-size:16px;border-radius:8px}
+ .left .tool>span:nth-child(2){min-width:0;width:100%;display:block}
+ .left .tool-name{display:block;font-size:9px;line-height:1.14;text-align:center;font-weight:700;letter-spacing:-.025em;white-space:normal;overflow-wrap:break-word;max-height:24px;overflow:hidden}
+ .left .tool-sub,.left .tool-short{display:none}
+ .left .tool.active{box-shadow:inset 0 0 0 1px #609f88;background:#dfebe1}
+ .left .hint{display:none}
+}
+@media(max-height:760px) and (min-width:701px){
+ .left{gap:3px;padding-top:7px}
+ .left .tool{min-height:55px;max-height:62px;padding:4px 2px}
+ .left .section-title{margin-top:4px}
+}
+@media(max-width:700px){
+ .left.expanded{display:grid;position:fixed;left:8px;right:8px;bottom:calc(88px + env(safe-area-inset-bottom,0px));z-index:22;width:auto;height:auto;max-height:min(68dvh,465px);overflow-y:auto;overflow-x:hidden;grid-template-columns:repeat(4,minmax(0,1fr));align-content:start;gap:5px;padding:10px;border-radius:16px;border:1px solid #d1dbd3;background:#fbfaf7;box-shadow:0 18px 70px #0719147d;white-space:normal;scroll-snap-type:none}
+ .left.expanded .section-title{display:block;grid-column:1/-1;margin:5px 3px 1px;font-size:9px}
+ .left.expanded .tool{width:100%!important;min-width:0;flex:none!important;max-height:59px;min-height:55px;scroll-snap-align:none}
+ .left.expanded .tool-symbol{flex:0 0 24px;width:25px;height:24px}
+ .left.expanded .tool-name{font-size:9px}
+}
